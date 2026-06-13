@@ -22,6 +22,8 @@ import { DebateArena } from '@/components/DebateArena';
 import { AccountabilityLedger } from '@/components/AccountabilityLedger';
 import { EquityIndex } from '@/components/EquityIndex';
 import { ReportCard } from '@/components/ReportCard';
+import { ShadowPolicyModal } from '@/components/ShadowPolicyModal';
+import { cleanDecision } from '@/services/shadowPolicy';
 import { MOCK_SIMULATIONS, SimulationRecord, Stakeholder, ConflictPair } from '@/constants/mockData';
 import { useTheme } from '@/hooks/use-theme';
 import { BorderRadius, BottomTabInset, Fonts, MaxContentWidth, Spacing } from '@/constants/theme';
@@ -66,6 +68,7 @@ export default function HomeScreen() {
   const [selectedStakeholder, setSelectedStakeholder] = useState<Stakeholder | null>(null);
   const [summaryAudioState, setSummaryAudioState] = useState<'idle' | 'loading' | 'playing' | 'paused' | 'error'>('idle');
   const [selectedDebateConflict, setSelectedDebateConflict] = useState<ConflictPair | null>(null);
+  const [showShadowPolicy, setShowShadowPolicy] = useState(false);
 
   // Summary inline audio refs (web: HTMLAudioElement)
   const summaryAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -699,7 +702,7 @@ export default function HomeScreen() {
 
                 </View>
                 <ThemedText type="smallBold" style={styles.bannerTitle}>
-                  {rawTranscriptText || proposalText}
+                  {cleanDecision(rawTranscriptText || proposalText)}
                 </ThemedText>
               </View>
 
@@ -762,6 +765,22 @@ export default function HomeScreen() {
 
               {/* Blind Spot Alert */}
               <BlindSpotAlert stakeholders={overlookedStakeholders} />
+
+              {/* Generate Improved Policy */}
+              {overlookedStakeholders.length > 0 && (
+                <Pressable
+                  onPress={() => setShowShadowPolicy(true)}
+                  style={({ pressed }) => [
+                    styles.shadowPolicyBtn,
+                    { borderColor: theme.primary, backgroundColor: theme.primaryContainer },
+                    pressed && { opacity: 0.8 },
+                  ]}>
+                  <ThemedText style={{ fontSize: 18 }}>✨</ThemedText>
+                  <ThemedText type="smallBold" style={{ color: theme.primary }}>
+                    Generate Improved Policy
+                  </ThemedText>
+                </Pressable>
+              )}
 
               {/* Conflict Map */}
               {displayedSimulation?.conflicts && displayedSimulation.conflicts.length > 0 && (
@@ -984,6 +1003,19 @@ export default function HomeScreen() {
           </View>
         </>
       )}
+
+      {/* ── SHADOW POLICY MODAL ── */}
+      <ShadowPolicyModal
+        visible={showShadowPolicy}
+        decision={englishSimulation?.decisionTitle || displayedSimulation?.decisionTitle || ''}
+        forgottenStakeholders={overlookedStakeholders}
+        conflicts={(englishSimulation?.conflicts || displayedSimulation?.conflicts || []).map(c => ({
+          groupA: c.groupA,
+          groupB: c.groupB,
+          reason: c.reason,
+        }))}
+        onClose={() => setShowShadowPolicy(false)}
+      />
 
     </ThemedView>
   );
@@ -1375,5 +1407,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.two,
     paddingVertical: 4,
     marginBottom: Spacing.two,
+  },
+  shadowPolicyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    paddingVertical: 14,
+    borderRadius: BorderRadius.medium,
+    borderWidth: 1,
+    marginTop: Spacing.three,
   },
 });

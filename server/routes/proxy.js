@@ -18,8 +18,12 @@ Your task is to analyse a proposed organisational, institutional, or governmenta
 1. Identify ALL affected stakeholder groups — both direct and indirect.
 2. Highlight groups that decision-makers commonly overlook (isOverlooked: true).
 3. Analyse how each group is impacted (positive, negative, or mixed).
-4. Detect conflicts where one group benefits at the direct expense of another.
-5. Generate an authentic first-person voice quote from each group's perspective.
+4. For each stakeholder, you MUST include severity as exactly one of: "high", "medium", or "low".
+   - high: policy directly and significantly harms this group
+   - medium: policy moderately affects this group  
+   - low: policy has minor effects on this group
+5. Detect conflicts where one group benefits at the direct expense of another.
+6. Generate an authentic first-person voice quote from each group's perspective.
 
 Be thorough, empathetic, and balanced. Prioritise overlooked groups such as:
 disabled individuals, commuters, part-time workers, caregivers, scholarship holders,
@@ -41,6 +45,7 @@ Return ONLY a valid JSON object (no markdown, no explanation) with this exact sh
       "name": "Group Name",
       "role": "Brief role description (max 10 words)",
       "impact": "positive" | "negative" | "mixed",
+      "severity": "high" | "medium" | "low",
       "isOverlooked": true | false,
       "voiceArchetype": "student" | "worker" | "authority" | "parent" | "default",
       "description": "2-3 sentence structural impact analysis.",
@@ -173,13 +178,13 @@ router.post('/gemini/analyze', async (req, res) => {
 
   try {
     const requestBody = {
-      model: 'llama-3.3-70b-versatile',
+      model: 'llama-3.1-8b-instant',
       messages: [
         { role: 'system', content: GEMINI_SYSTEM_INSTRUCTION },
         { role: 'user', content: GEMINI_PROMPT_TEMPLATE(decisionText.trim()) },
       ],
       temperature: 0.7,
-      max_tokens: 8192,
+      max_tokens: 4000,
       response_format: { type: 'json_object' },
     };
 
@@ -285,6 +290,91 @@ router.post('/gemini/translate', async (req, res) => {
     res.json(translated);
   } catch (err) {
     console.error('[Proxy translate] Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/gemini/shadow-policy', async (req, res) => {
+  const { decision, forgottenStakeholders, conflicts } = req.body;
+  if (!decision) {
+    return res.status(400).json({ error: 'Missing decision text.' });
+  }
+
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'Missing API key on server.' });
+  }
+
+  // Truncate decision to avoid exceeding context window
+  const truncatedDecision = decision.length > 500 ? decision.slice(0, 500) + '...' : decision;
+
+  const forgottenList = (forgottenStakeholders || [])
+    .map((s) => `- ${s.name}: ${s.reason}`)
+    .join('\n');
+
+  const conflictList = (conflicts || [])
+    .map((c) => `- ${c.groupA} vs ${c.groupB}: ${c.reason}`)
+    .join('\n');
+
+  const systemPrompt = 'You are a policy improvement expert. You will receive a decision and its blind spots. Generate an improved policy as valid JSON only. Each "clause" in the changes array must be a single short sentence, maximum 15 words.';
+
+  const userPrompt = [
+    'Analyze this decision and generate an improved version.',
+    '',
+    'DECISION:',
+    truncatedDecision,
+    '',
+    'OVERLOOKED GROUPS:',
+    forgottenList || 'None identified.',
+    '',
+    'CONFLICTS:',
+    conflictList || 'None identified.',
+    '',
+    'Generate an improved version that keeps the original intent, adds clauses for each forgotten group, and resolves conflicts. Write it as an actual policy document.',
+    '',
+    'Return JSON in this exact format:',
+    '{"improvedPolicy": "Full improved policy text...", "changes": [{"group": "Group Name", "clause": "Short summary max 15 words"}]}',
+  ].join('\n');
+
+  try {
+    const response = await fetch(GROQ_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.4,
+        max_tokens: 4000,
+        response_format: { type: 'json_object' },
+      }),
+    });
+
+    if (!response.ok) {
+      const errBody = await response.text();
+      console.error('[Proxy shadow-policy] Groq error body:', errBody);
+      throw new Error(`Shadow policy call failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const raw = data?.choices?.[0]?.message?.content;
+    if (!raw) throw new Error('Shadow policy returned empty content.');
+
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error('Shadow policy response was not valid JSON.');
+    }
+
+    res.json(parsed);
+  } catch (err) {
+    console.error('[Proxy shadow-policy] Error:', err);
     res.status(500).json({ error: err.message });
   }
 });

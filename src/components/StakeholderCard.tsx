@@ -80,8 +80,9 @@ export function StakeholderCard({
     },
   };
 
-  const { bg: impactBg, text: impactText } = impactColors[impact];
-  const iconConfig = IMPACT_CONFIG[impact];
+  const safeImpact = impactColors[impact] ? impact : 'mixed';
+  const { bg: impactBg, text: impactText } = impactColors[safeImpact];
+  const iconConfig = IMPACT_CONFIG[safeImpact];
 
   return (
     <Animated.View style={animatedStyle}>

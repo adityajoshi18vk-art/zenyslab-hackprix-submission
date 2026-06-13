@@ -18,23 +18,28 @@ export function calculateEquityScore(
 ) {
   let score = 100;
 
-  // -10 per forgotten stakeholder
+  // -12 per forgotten stakeholder
   const forgottenCount = blindSpots?.length || 0;
-  score -= forgottenCount * 10;
+  score -= forgottenCount * 12;
 
-  // -8 per conflict
+  // -10 per conflict
   const conflictCount = conflicts?.length || 0;
-  score -= conflictCount * 8;
+  score -= conflictCount * 10;
 
-  // -5 per high severity negative stakeholder
-  const highSeverityNegative = stakeholders?.filter(
-    s => s.impact === 'negative' && (s as any).severity === 'high'
+  // Count stakeholders by impact — ignore severity field entirely
+  const negativeCount = stakeholders?.filter(
+    s => s.impact === 'negative'
   ).length || 0;
-  score -= highSeverityNegative * 5;
+  score -= negativeCount * 10;
+
+  const mixedCount = stakeholders?.filter(
+    s => s.impact === 'mixed'
+  ).length || 0;
+  score -= mixedCount * 4;
 
   const finalScore = Math.max(8, score);
   
-  console.log('Score breakdown:', { forgottenCount, conflictCount, highSeverityNegative, finalScore });
+  console.log('Score breakdown:', { forgottenCount, conflictCount, negativeCount, mixedCount, finalScore });
   
   return finalScore;
 }
