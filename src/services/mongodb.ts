@@ -1,101 +1,111 @@
 /**
- * MongoDB Atlas Data API service for persisting simulation history.
+ * Echo – Decision Blind Spot Detector
+ * MongoDB persistence service.
  *
- * Uses the Atlas Data API (HTTP REST) — no Mongoose SDK needed.
- * Enable the Data API in your Atlas project and set environment variables.
+ * The Expo app cannot use the native `mongodb` driver because it relies on
+ * Node.js built-ins (net, tls, dns) unavailable in React Native.
+ * Instead, this service calls the local Express API server (server/index.js)
+ * over plain HTTP.
  *
- * Docs: https://www.mongodb.com/docs/atlas/api/data-api/
+ * Server must be running:
+ *   cd server && npm install && npm run dev
+ *
+ * Environment variable (root .env):
+ *   EXPO_PUBLIC_API_URL=http://localhost:3000   ← defaults to this if not set
+ *
+ * The app falls back to mock data (empty history) if the server is unreachable.
  */
 
 import { SimulationRecord } from '@/constants/mockData';
 
-function getConfig() {
-  const url = process.env.EXPO_PUBLIC_MONGODB_DATA_API_URL;
-  const apiKey = process.env.EXPO_PUBLIC_MONGODB_API_KEY;
-  const database = process.env.EXPO_PUBLIC_MONGODB_DATABASE ?? 'echo';
-  const collection = process.env.EXPO_PUBLIC_MONGODB_COLLECTION ?? 'simulations';
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
 
-  if (!url || !apiKey) {
-    throw new Error(
-      'Missing MongoDB Atlas Data API configuration. ' +
-        'Please set EXPO_PUBLIC_MONGODB_DATA_API_URL and EXPO_PUBLIC_MONGODB_API_KEY in your .env file.'
-    );
-  }
-
-  return { url, apiKey, database, collection };
+/**
+ * Base URL of the Express API server.
+ * Override with EXPO_PUBLIC_API_URL in .env to point at a deployed server.
+ * For Android emulator use http://10.0.2.2:3000 (loopback alias).
+ * For physical device use your machine's LAN IP, e.g. http://192.168.1.x:3000
+ */
+function getApiUrl(): string {
+  return (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000').replace(/\/$/, '');
 }
 
-async function mongoRequest<T>(action: string, body: Record<string, unknown>): Promise<T> {
-  const { url, apiKey, database, collection } = getConfig();
+const ENDPOINT = () => `${getApiUrl()}/api/simulations`;
 
-  const response = await fetch(`${url}/action/${action}`, {
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Strips client-only fields before sending to the server. */
+function toPayload(record: SimulationRecord): Record<string, unknown> {
+  const { mongoId, ...rest } = record;
+  return rest;
+}
+
+// ---------------------------------------------------------------------------
+// Public API — mirrors the previous Data API service interface
+// ---------------------------------------------------------------------------
+
+/**
+ * Saves a new simulation to MongoDB via the Express API.
+ * Returns the MongoDB-generated document ID (_id as string).
+ * Throws on network or server errors.
+ */
+export async function saveSimulation(record: SimulationRecord): Promise<string> {
+  const response = await fetch(ENDPOINT(), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'api-key': apiKey,
-    },
-    body: JSON.stringify({
-      dataSource: 'Cluster0',
-      database,
-      collection,
-      ...body,
-    }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(toPayload(record)),
   });
 
   if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`MongoDB Atlas API error (${response.status}): ${errorBody}`);
+    const text = await response.text();
+    throw new Error(`Echo API error (${response.status}): ${text}`);
   }
 
-  return response.json() as Promise<T>;
-}
-
-/** Strips internal fields that should not be stored in MongoDB */
-function toDocument(record: SimulationRecord): Record<string, unknown> {
-  const { mongoId, ...doc } = record;
-  return {
-    ...doc,
-    createdAt: new Date().toISOString(),
-  };
+  const data: { mongoId: string } = await response.json();
+  return data.mongoId;
 }
 
 /**
- * Saves a simulation record to MongoDB Atlas.
- * Returns the MongoDB-generated document ID (_id as string).
- */
-export async function saveSimulation(record: SimulationRecord): Promise<string> {
-  const result = await mongoRequest<{ insertedId: string }>('insertOne', {
-    document: toDocument(record),
-  });
-  return result.insertedId;
-}
-
-/**
- * Retrieves all past simulations, sorted by timestamp descending (most recent first).
- * Returns an empty array if the collection doesn't exist or API is not configured.
+ * Retrieves all simulations, sorted by createdAt desc (most recent first).
+ * Returns an empty array if the server is unreachable — app runs in demo mode.
  */
 export async function listSimulations(): Promise<SimulationRecord[]> {
   try {
-    const result = await mongoRequest<{ documents: SimulationRecord[] }>('find', {
-      sort: { createdAt: -1 },
-      limit: 50,
+    const response = await fetch(ENDPOINT(), {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
     });
-    return result.documents.map((doc: any) => ({
-      ...doc,
-      mongoId: doc._id?.toString() ?? doc._id,
-    }));
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Echo API error (${response.status}): ${text}`);
+    }
+
+    const records: SimulationRecord[] = await response.json();
+    return records;
   } catch (error) {
-    // If MongoDB is not configured, return empty (app works without it)
-    console.warn('MongoDB listSimulations failed — using empty history:', error);
+    // Server not running or unreachable — graceful degradation to empty history
+    console.warn('[Echo] listSimulations: server unreachable, using empty history.', error);
     return [];
   }
 }
 
 /**
  * Deletes a single simulation by its MongoDB document ID.
+ * Throws on network or server errors.
  */
 export async function deleteSimulation(mongoId: string): Promise<void> {
-  await mongoRequest('deleteOne', {
-    filter: { _id: { $oid: mongoId } },
+  const response = await fetch(`${ENDPOINT()}/${mongoId}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
   });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Echo API error (${response.status}): ${text}`);
+  }
 }

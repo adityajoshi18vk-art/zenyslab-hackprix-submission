@@ -71,13 +71,13 @@ async function generateSarvamTTS(
     body: JSON.stringify({
       inputs: [text],
       target_language_code: lang,
-      speaker: lang === 'hi-IN' ? 'meera' : 'pavithra',
+      speaker: lang === 'hi-IN' ? 'anushka' : 'arya',
       pitch: 0,
       pace: 1.0,
       loudness: 1.5,
       speech_sample_rate: 22050,
       enable_preprocessing: true,
-      model: 'bulbul:v1',
+      model: 'bulbul:v2',
     }),
   });
 
