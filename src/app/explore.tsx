@@ -133,7 +133,7 @@ export default function HistoryScreen() {
               History Log
             </ThemedText>
             <ThemedText type="small" themeColor="textSecondary" style={styles.description}>
-              Pull down to refresh. Tap a record to expand and explore its stakeholder evaluations.
+              Pull down to refresh. Tap a record to expand and explore its stakeholder evaluations. Persisted securely via MongoDB Atlas.
             </ThemedText>
 
             {simulations.length === 0 && !isRefreshing && (
@@ -425,7 +425,7 @@ export default function HistoryScreen() {
             </View>
 
             <ThemedText type="code" themeColor="textSecondary" style={styles.sarvamNote}>
-              * English voices via ElevenLabs. Hindi &amp; Telugu powered by Sarvam AI.
+              * English voices via ElevenLabs high-fidelity cloning. Hindi &amp; Telugu translation and speech synthesis powered by Sarvam AI.
             </ThemedText>
 
             <View style={{ height: BottomTabInset + Spacing.five }} />

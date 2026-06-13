@@ -14,11 +14,11 @@ import { useTheme } from '@/hooks/use-theme';
 import { BorderRadius, Spacing } from '@/constants/theme';
 
 const LOADING_STEPS = [
-  'Mapping stakeholders...',
-  'Simulating downstream impact...',
-  'Surfacing hidden conflicts...',
-  'Identifying decision blind spots...',
-  'Who did we forget?...'
+  'Mapping stakeholders via Gemini 2.5 Flash...',
+  'Simulating downstream impact via Gemini 2.5 Flash...',
+  'Surfacing hidden conflicts via Gemini 2.5 Flash...',
+  'Identifying decision blind spots via Gemini 2.5 Flash...',
+  'Preparing simulation record for MongoDB Atlas...',
 ];
 
 interface AnalysisLoaderProps {

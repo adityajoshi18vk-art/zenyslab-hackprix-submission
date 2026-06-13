@@ -372,7 +372,7 @@ export default function HomeScreen() {
                   {rawTranscriptText.trim().length > 0 && (
                     <>
                       <ThemedText type="code" themeColor="textSecondary" style={styles.transcriptionHeader}>
-                        RAW SPEECH TRANSCRIPT:
+                        RAW SPEECH TRANSCRIPT (SARVAM AI STT):
                       </ThemedText>
                       <ThemedText type="small" themeColor="textSecondary" style={[styles.transcriptionText, { marginBottom: Spacing.two, opacity: 0.8 }]}>
                         &ldquo;{rawTranscriptText}&rdquo;
@@ -380,7 +380,7 @@ export default function HomeScreen() {
                     </>
                   )}
                   <ThemedText type="code" themeColor="primary" style={styles.transcriptionHeader}>
-                    REFINED DECISION PROPOSAL (GEMINI):
+                    REFINED DECISION PROPOSAL (GEMINI 2.5 FLASH):
                   </ThemedText>
                   <ThemedText type="small" style={styles.transcriptionText}>
                     &ldquo;{proposalText}&rdquo;

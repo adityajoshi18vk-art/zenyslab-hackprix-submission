@@ -77,10 +77,10 @@ export function AccountabilityLedger({ decision, blindSpots }: AccountabilityLed
         <Animated.View entering={FadeIn} style={styles.stateContainer}>
           <View style={styles.headerRow}>
             <SymbolView name={{ ios: 'book.closed.fill', android: 'menu_book', web: 'menu_book' }} tintColor={theme.primary} size={20} />
-            <ThemedText type="smallBold">Publish to Accountability Ledger</ThemedText>
+            <ThemedText type="smallBold">Publish to Solana Accountability Ledger</ThemedText>
           </View>
           <ThemedText type="small" themeColor="textSecondary" style={styles.description}>
-            Create a permanent on-chain record that these blind spots were seen.
+            Create a permanent, verifiable on-chain record on the Solana Devnet blockchain using your Phantom Wallet.
           </ThemedText>
           <Pressable onPress={handleConnectAndPublish} style={[styles.buttonWrapper, { backgroundColor: theme.primary }]}>
             <View style={styles.gradientButton}>

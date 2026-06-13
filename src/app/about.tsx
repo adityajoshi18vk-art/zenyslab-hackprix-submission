@@ -120,7 +120,7 @@ export default function AboutScreen() {
             </ThemedText>
 
             <TechCard
-              name="Gemini 2.0 Flash"
+              name="Gemini 2.5 Flash"
               description="Stakeholder discovery, conflict analysis & blind spot detection"
               iconName={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
               url="https://ai.google.dev"
@@ -133,9 +133,15 @@ export default function AboutScreen() {
             />
             <TechCard
               name="Sarvam AI"
-              description="Indian-language translation & TTS for Hindi and Telugu perspectives"
+              description="Indian-language transcription (STT), translation & speech synthesis (TTS) for Hindi and Telugu perspectives"
               iconName={{ ios: 'globe', android: 'language', web: 'language' }}
               url="https://sarvam.ai"
+            />
+            <TechCard
+              name="Solana Devnet & Phantom Wallet"
+              description="On-chain accountability ledger for recorded blind spots and decision data"
+              iconName={{ ios: 'book.closed.fill', android: 'menu_book', web: 'menu_book' }}
+              url="https://solana.com"
             />
             <TechCard
               name="MongoDB Atlas"
