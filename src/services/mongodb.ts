@@ -28,7 +28,7 @@ import { SimulationRecord } from '@/constants/mockData';
  * For Android emulator use http://10.0.2.2:3000 (loopback alias).
  * For physical device use your machine's LAN IP, e.g. http://192.168.1.x:3000
  */
-function getApiUrl(): string {
+export function getApiUrl(): string {
   return (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000').replace(/\/$/, '');
 }
 
