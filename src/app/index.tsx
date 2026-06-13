@@ -886,6 +886,7 @@ export default function HomeScreen() {
                 currentSimulation._englishVersion?.stakeholders ??
                 currentSimulation.stakeholders
               }
+              language={spokenLanguage === 'hi-IN' ? 'hi-IN' : spokenLanguage === 'te-IN' ? 'te-IN' : 'en-IN'}
               onClose={handleCloseDebate}
             />
           </View>

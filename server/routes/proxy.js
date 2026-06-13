@@ -302,7 +302,22 @@ router.post('/gemini/refine', async (req, res) => {
     }
 
     const data = await response.json();
-    const refined = data?.choices?.[0]?.message?.content;
+    let refined = data?.choices?.[0]?.message?.content;
+
+    if (refined) {
+      // Strip common LLM preamble phrases that models sometimes prepend
+      refined = refined
+        .replace(/^(the )?refined (transcript|version|text|proposal) is:?\s*/i, '')
+        .replace(/^here is the refined.*?:\s*/i, '')
+        .replace(/^refined:?\s*/i, '')
+        .replace(/^sure[,!.]?\s*/i, '')
+        .replace(/^(here'?s?|this is) (the )?(refined|cleaned|corrected).*?:\s*/i, '')
+        .trim();
+      // Strip surrounding quotes if the entire text is wrapped in them
+      if (refined.startsWith('"') && refined.endsWith('"')) {
+        refined = refined.slice(1, -1).trim();
+      }
+    }
 
     res.json({ refinedText: refined ? refined.trim() : trimmed });
   } catch (err) {

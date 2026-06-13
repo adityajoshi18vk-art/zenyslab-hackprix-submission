@@ -1,16 +1,15 @@
 /**
- * DebateArena
+ * DebateArena — Pipeline-first debate engine
  *
- * A self-contained debate panel where two conflicting stakeholder groups argue
- * continuously using AI-generated text and ElevenLabs TTS voices.
+ * Flow per turn:
+ *   1. Show text immediately in transcript (no wait)
+ *   2. Play audio
+ *   3. WHILE audio plays → prefetch NEXT turn's text + audio in background
+ *   4. When audio ends → next turn is already ready → zero gap
  *
- * Debate loop per turn:
- *   1. Call generateDebateTurn → get 2-3 sentence rebuttal text
- *   2. Call generateVoice with the speaker's voice archetype → base64 MP3
- *   3. Play audio via HTMLAudioElement (web)
- *   4. On audio end → append to transcript → flip speaker → trigger next turn
- *
- * The loop runs until the user taps Stop or the component unmounts.
+ * Arguments are 1 sentence max for punchy, real debate energy.
+ * Multi-language: text always generated in English for quality,
+ * TTS via ElevenLabs (English) or Sarvam (Hindi/Telugu).
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -26,10 +25,10 @@ import { SymbolView } from 'expo-symbols';
 
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
-import { BorderRadius, Fonts, Spacing } from '@/constants/theme';
+import { BorderRadius, Spacing } from '@/constants/theme';
 import { ConflictPair, Stakeholder, VoiceArchetype } from '@/constants/mockData';
-import { DebateTurnHistoryEntry } from '@/services/gemini';
 import { generateVoice } from '@/services/elevenlabs';
+import { translateAndSpeak } from '@/services/sarvam';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,9 +36,11 @@ import { generateVoice } from '@/services/elevenlabs';
 
 export interface DebateArenaProps {
   conflict: ConflictPair;
+  /** Always the English version of the decision title for best AI quality */
   decisionContext: string;
-  /** Full stakeholder list from the simulation, used to look up voice archetypes */
   stakeholders: Stakeholder[];
+  /** The language the user spoke in — drives TTS language selection */
+  language?: 'en-IN' | 'hi-IN' | 'te-IN' | 'unknown';
   onClose: () => void;
 }
 
@@ -48,15 +49,23 @@ interface TranscriptEntry {
   speaker: 'groupA' | 'groupB';
   speakerName: string;
   text: string;
-  /** True while this turn is currently being spoken */
   isActive: boolean;
+}
+
+/** Everything needed to immediately play and show the next turn */
+interface PrefetchedTurn {
+  speakerSide: 'groupA' | 'groupB';
+  speakerName: string;
+  text: string;
+  /** null = audio failed; debate continues without audio for this turn */
+  audioBase64: string | null;
+  mimeType: 'audio/mpeg' | 'audio/wav';
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Find the best-matching voice archetype for a stakeholder group name */
 function resolveArchetype(groupName: string, stakeholders: Stakeholder[]): VoiceArchetype {
   const match = stakeholders.find(
     (s) => s.name.toLowerCase().trim() === groupName.toLowerCase().trim()
@@ -64,247 +73,265 @@ function resolveArchetype(groupName: string, stakeholders: Stakeholder[]): Voice
   return match?.voiceArchetype ?? 'default';
 }
 
-/** Play a base64 MP3 string via HTMLAudioElement on web, resolves when done */
-function playBase64Audio(base64: string): Promise<void> {
+/** Plays base64 audio and resolves when it finishes. Stores ref for stop control. */
+function playBase64Audio(
+  base64: string,
+  mimeType: string,
+  activeAudioRef: React.MutableRefObject<HTMLAudioElement | null>
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const AudioCtor = (typeof window !== 'undefined' ? window.Audio : null) as
       | (new (src?: string) => HTMLAudioElement)
       | null;
-    if (!AudioCtor) {
-      reject(new Error('Audio not supported on this platform'));
-      return;
-    }
-    const audio = new AudioCtor(`data:audio/mpeg;base64,${base64}`);
-    audio.addEventListener('ended', () => resolve());
-    audio.addEventListener('error', (e) => reject(e));
-    audio.play().catch(reject);
+    if (!AudioCtor) { resolve(); return; }
+
+    const audio = new AudioCtor(`data:${mimeType};base64,${base64}`);
+    activeAudioRef.current = audio;
+    audio.addEventListener('ended', () => { activeAudioRef.current = null; resolve(); });
+    audio.addEventListener('error', () => { activeAudioRef.current = null; resolve(); }); // non-fatal
+    audio.play().catch(() => { activeAudioRef.current = null; resolve(); });
   });
 }
 
-/**
- * Calls Groq directly from the client to generate one debate turn.
- * Bypasses the server proxy — the API key is already EXPO_PUBLIC so
- * it is visible to the browser bundle regardless.
- */
-async function callGroqForDebateTurn(params: {
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// ---------------------------------------------------------------------------
+// Direct Groq call — 1 sentence, punchy
+// ---------------------------------------------------------------------------
+
+const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+
+async function fetchDebateText(params: {
   groupA: string;
   groupB: string;
   decisionContext: string;
   conflictReason: string;
-  currentSpeaker: 'groupA' | 'groupB';
-  history: DebateTurnHistoryEntry[];
+  speakerSide: 'groupA' | 'groupB';
+  history: Array<{ speaker: string; text: string }>;
 }): Promise<string> {
-  const { groupA, groupB, decisionContext, conflictReason, currentSpeaker, history } = params;
-  const apiKey = process.env.EXPO_PUBLIC_GROQ_API_KEY ?? (process.env as any).GROQ_API_KEY ?? '';
+  const { groupA, groupB, decisionContext, conflictReason, speakerSide, history } = params;
+  const apiKey = process.env.EXPO_PUBLIC_GROQ_API_KEY ?? '';
 
-  if (!apiKey) {
-    throw new Error('No Groq API key found. Set EXPO_PUBLIC_GROQ_API_KEY in your .env file.');
-  }
+  if (!apiKey) throw new Error('Missing EXPO_PUBLIC_GROQ_API_KEY in .env');
 
-  const speakerName = currentSpeaker === 'groupA' ? groupA : groupB;
-  const opponentName = currentSpeaker === 'groupA' ? groupB : groupA;
+  const speakerName = speakerSide === 'groupA' ? groupA : groupB;
+  const opponentName = speakerSide === 'groupA' ? groupB : groupA;
 
   const historyText = history
-    .slice(-6)
+    .slice(-4) // last 4 turns for tight context
     .map((t) => `${t.speaker}: "${t.text}"`)
     .join('\n');
 
-  const systemPrompt = `You are ${speakerName} in a heated public debate about a real policy decision.
+  const system = `You are ${speakerName} in a heated debate.
+Conflict: ${conflictReason}
+Rules: ONE sentence only. First-person. Passionate and direct. Rebut ${opponentName}'s last point. No filler.`;
 
-Your core conflict: ${conflictReason}
+  const user = `Decision: "${decisionContext}"
+${historyText ? `Recent exchange:\n${historyText}\n` : ''}${speakerName} fires back (ONE sentence, sharp):`;
 
-Rules:
-- Speak ONLY as ${speakerName}. Never break character.
-- Be passionate, urgent, and specific to this EXACT decision.
-- Directly rebut what ${opponentName} just said if there is history.
-- Use "I", "we", or "our community" — first-person only.
-- Keep it to 2-3 sentences MAX. Spoken audio, not an essay.
-- No filler phrases — jump straight into your argument.
-- Reference concrete, real consequences for your group.
-- End on a strong, punchy note.`;
-
-  const userPrompt = `Decision being debated: "${decisionContext}"
-
-${historyText ? `Debate so far:\n${historyText}\n\n` : ''}Now speak as ${speakerName} (2-3 sentences, passionate and direct):`;
-
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+  const resp = await fetch(GROQ_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       model: 'llama-3.3-70b-versatile',
       messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
+        { role: 'system', content: system },
+        { role: 'user', content: user },
       ],
-      temperature: 0.85,
-      max_tokens: 200,
+      temperature: 0.9,
+      max_tokens: 80, // forces brevity
     }),
   });
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Groq debate error (${response.status}): ${err}`);
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`Groq error (${resp.status}): ${err}`);
   }
 
-  const data = await response.json();
-  const text = data?.choices?.[0]?.message?.content?.trim();
-  if (!text) throw new Error('Groq returned empty debate turn.');
-  return text;
+  const data = await resp.json();
+  const text = data?.choices?.[0]?.message?.content?.trim() ?? '';
+  // Strip any quotes the model wraps the sentence in
+  return text.replace(/^["'"'"]|["'"'"]$/g, '').trim();
+}
+
+// ---------------------------------------------------------------------------
+// Audio fetch helper — handles English (ElevenLabs) + Hindi/Telugu (Sarvam)
+// ---------------------------------------------------------------------------
+
+async function fetchDebateAudio(
+  text: string,
+  archetype: VoiceArchetype,
+  language: 'en-IN' | 'hi-IN' | 'te-IN' | 'unknown'
+): Promise<{ base64: string; mimeType: 'audio/mpeg' | 'audio/wav' }> {
+  if (language === 'hi-IN' || language === 'te-IN') {
+    const base64 = await translateAndSpeak(text, language);
+    return { base64, mimeType: 'audio/wav' };
+  }
+  const base64 = await generateVoice(text, archetype, {
+    stability: 0.38,      // lower = more emotive
+    similarityBoost: 0.80,
+    style: 0.40,          // style exaggeration for debate energy
+  });
+  return { base64, mimeType: 'audio/mpeg' };
+}
+
+// ---------------------------------------------------------------------------
+// Prefetch one full turn (text + audio) in one shot
+// ---------------------------------------------------------------------------
+
+async function prefetchTurn(params: {
+  speakerSide: 'groupA' | 'groupB';
+  conflict: ConflictPair;
+  decisionContext: string;
+  history: Array<{ speaker: string; text: string }>;
+  stakeholders: Stakeholder[];
+  language: 'en-IN' | 'hi-IN' | 'te-IN' | 'unknown';
+}): Promise<PrefetchedTurn> {
+  const { speakerSide, conflict, decisionContext, history, stakeholders, language } = params;
+  const speakerName = speakerSide === 'groupA' ? conflict.groupA : conflict.groupB;
+  const archetype = resolveArchetype(speakerName, stakeholders);
+
+  // Step 1: generate text
+  const text = await fetchDebateText({
+    groupA: conflict.groupA,
+    groupB: conflict.groupB,
+    decisionContext,
+    conflictReason: conflict.reason,
+    speakerSide,
+    history,
+  });
+
+  // Step 2: generate audio (non-fatal)
+  let audioBase64: string | null = null;
+  let mimeType: 'audio/mpeg' | 'audio/wav' = 'audio/mpeg';
+  try {
+    const result = await fetchDebateAudio(text, archetype, language);
+    audioBase64 = result.base64;
+    mimeType = result.mimeType;
+  } catch (e) {
+    console.warn('[DebateArena] Audio fetch failed for turn, continuing silently:', e);
+  }
+
+  return { speakerSide, speakerName, text, audioBase64, mimeType };
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function DebateArena({ conflict, decisionContext, stakeholders, onClose }: DebateArenaProps) {
+export function DebateArena({
+  conflict,
+  decisionContext,
+  stakeholders,
+  language = 'unknown',
+  onClose,
+}: DebateArenaProps) {
   const theme = useTheme();
 
-  // Debate state
   const [isRunning, setIsRunning] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [isLoading, setIsLoading] = useState(false); // true only for very first turn
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [currentSpeaker, setCurrentSpeaker] = useState<'groupA' | 'groupB'>('groupA');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [turnCount, setTurnCount] = useState(0);
 
-  // Refs — avoid stale closures in the async debate loop
+  // Refs
   const isRunningRef = useRef(false);
-  const historyRef = useRef<DebateTurnHistoryEntry[]>([]);
-  const currentSpeakerRef = useRef<'groupA' | 'groupB'>('groupA');
-  const scrollRef = useRef<ScrollView>(null);
+  const historyRef = useRef<Array<{ speaker: string; text: string }>>([]);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
 
-  // Pulsing animation for the active speaker indicator
+  // Pulsing animation
   const pulseAnim = useRef(new Animated.Value(1)).current;
-
   useEffect(() => {
-    if (isGenerating || isRunning) {
-      const pulse = Animated.loop(
+    if (isRunning || isLoading) {
+      const loop = Animated.loop(
         Animated.sequence([
-          Animated.timing(pulseAnim, { toValue: 1.35, duration: 600, useNativeDriver: true }),
-          Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1.4, duration: 550, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1, duration: 550, useNativeDriver: true }),
         ])
       );
-      pulse.start();
-      return () => pulse.stop();
+      loop.start();
+      return () => loop.stop();
     }
-  }, [isGenerating, isRunning, pulseAnim]);
+  }, [isRunning, isLoading, pulseAnim]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       isRunningRef.current = false;
-      if (activeAudioRef.current) {
-        activeAudioRef.current.pause();
-        activeAudioRef.current = null;
-      }
+      activeAudioRef.current?.pause();
     };
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Debate loop
+  // Pipeline loop
   // ---------------------------------------------------------------------------
 
-  const runDebateTurn = useCallback(async () => {
-    if (!isRunningRef.current) return;
+  /**
+   * runPipeline starts with a Promise for the current turn (already in-flight),
+   * plays it, then recursively prefetches + plays the next turn.
+   */
+  const runPipeline = useCallback(
+    async (currentTurnPromise: Promise<PrefetchedTurn>) => {
+      if (!isRunningRef.current) return;
 
-    const speaker = currentSpeakerRef.current;
-    const speakerName = speaker === 'groupA' ? conflict.groupA : conflict.groupB;
-    const archetype = resolveArchetype(speakerName, stakeholders);
-
-    setIsGenerating(true);
-    setCurrentSpeaker(speaker);
-
-    try {
-      // 1. Generate the spoken argument text
-      const text = await callGroqForDebateTurn({
-        groupA: conflict.groupA,
-        groupB: conflict.groupB,
-        decisionContext,
-        conflictReason: conflict.reason,
-        currentSpeaker: speaker,
-        history: historyRef.current,
-      });
-
-      if (!isRunningRef.current) return; // Stopped while generating
-
-      // 2. Add to transcript (marked active while speaking)
-      const entryId = `turn-${Date.now()}-${Math.random()}`;
-      const newEntry: TranscriptEntry = {
-        id: entryId,
-        speaker,
-        speakerName,
-        text,
-        isActive: true,
-      };
-
-      setTranscript((prev) => [
-        ...prev.map((e) => ({ ...e, isActive: false })), // deactivate previous
-        newEntry,
-      ]);
-
-      // Update history ref for next turn's context
-      historyRef.current = [
-        ...historyRef.current,
-        { speaker: speakerName, text },
-      ].slice(-10); // Keep last 10 entries to bound memory
-
-      setTurnCount((c) => c + 1);
-
-      // Scroll to bottom
-      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
-
-      setIsGenerating(false);
-
-      // 3. Generate and play voice audio
-      if (isRunningRef.current) {
-        try {
-          const base64Audio = await generateVoice(text, archetype, {
-            stability: 0.45,        // Slightly lower stability = more passionate delivery
-            similarityBoost: 0.80,
-            style: 0.30,            // Some style exaggeration for debate energy
-          });
-
-          if (!isRunningRef.current) return;
-
-          await playBase64Audio(base64Audio);
-        } catch (audioErr) {
-          // Audio failure is non-fatal — skip to next turn
-          console.warn('[DebateArena] Audio error, skipping turn:', audioErr);
+      let turn: PrefetchedTurn;
+      try {
+        turn = await currentTurnPromise;
+      } catch (err: any) {
+        console.error('[DebateArena] Turn fetch error:', err);
+        if (isRunningRef.current) {
+          setErrorMessage(err.message || 'Failed to generate argument.');
+          setIsRunning(false);
+          setIsLoading(false);
+          isRunningRef.current = false;
         }
+        return;
       }
 
       if (!isRunningRef.current) return;
 
-      // 4. Mark entry as no longer active
-      setTranscript((prev) =>
-        prev.map((e) => (e.id === entryId ? { ...e, isActive: false } : e))
-      );
+      // ── Show text immediately ──────────────────────────────────────────────
+      const entryId = `turn-${Date.now()}-${Math.random()}`;
+      setTranscript((prev) => [
+        ...prev.map((e) => ({ ...e, isActive: false })),
+        { id: entryId, speaker: turn.speakerSide, speakerName: turn.speakerName, text: turn.text, isActive: true },
+      ]);
+      historyRef.current = [...historyRef.current, { speaker: turn.speakerName, text: turn.text }].slice(-10);
+      setCurrentSpeaker(turn.speakerSide);
+      setTurnCount((c) => c + 1);
+      setIsLoading(false);
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
 
-      // 5. Flip speaker and schedule next turn
-      const nextSpeaker = speaker === 'groupA' ? 'groupB' : 'groupA';
-      currentSpeakerRef.current = nextSpeaker;
-      setCurrentSpeaker(nextSpeaker);
+      // ── Start prefetching NEXT turn immediately (runs in background) ───────
+      const nextSide: 'groupA' | 'groupB' = turn.speakerSide === 'groupA' ? 'groupB' : 'groupA';
+      const nextTurnPromise = prefetchTurn({
+        speakerSide: nextSide,
+        conflict,
+        decisionContext,
+        history: historyRef.current, // snapshot of history with this turn included
+        stakeholders,
+        language,
+      });
 
-      // Brief pause between turns for natural rhythm
-      await new Promise((r) => setTimeout(r, 400));
-
-      if (isRunningRef.current) {
-        runDebateTurn();
+      // ── Play current audio ─────────────────────────────────────────────────
+      if (turn.audioBase64 && isRunningRef.current) {
+        await playBase64Audio(turn.audioBase64, turn.mimeType, activeAudioRef);
       }
-    } catch (err: any) {
-      console.error('[DebateArena] Turn error:', err);
-      setIsGenerating(false);
-      if (isRunningRef.current) {
-        setErrorMessage(err.message || 'Failed to generate debate turn.');
-        setIsRunning(false);
-        isRunningRef.current = false;
-      }
-    }
-  }, [conflict, decisionContext, stakeholders]);
+
+      if (!isRunningRef.current) return;
+
+      // Deactivate this entry
+      setTranscript((prev) => prev.map((e) => (e.id === entryId ? { ...e, isActive: false } : e)));
+
+      // ── Next turn is likely already prefetched — minimal or zero gap ───────
+      runPipeline(nextTurnPromise);
+    },
+    [conflict, decisionContext, stakeholders, language]
+  );
 
   // ---------------------------------------------------------------------------
   // Controls
@@ -314,23 +341,31 @@ export function DebateArena({ conflict, decisionContext, stakeholders, onClose }
     setErrorMessage(null);
     setTranscript([]);
     historyRef.current = [];
-    currentSpeakerRef.current = 'groupA';
     setCurrentSpeaker('groupA');
     setTurnCount(0);
     isRunningRef.current = true;
     setIsRunning(true);
-    runDebateTurn();
-  }, [runDebateTurn]);
+    setIsLoading(true);
+
+    // Kick off the first turn prefetch immediately
+    const firstTurnPromise = prefetchTurn({
+      speakerSide: 'groupA',
+      conflict,
+      decisionContext,
+      history: [],
+      stakeholders,
+      language,
+    });
+
+    runPipeline(firstTurnPromise);
+  }, [conflict, decisionContext, stakeholders, language, runPipeline]);
 
   const handleStop = useCallback(() => {
     isRunningRef.current = false;
     setIsRunning(false);
-    setIsGenerating(false);
-    if (activeAudioRef.current) {
-      activeAudioRef.current.pause();
-      activeAudioRef.current = null;
-    }
-    // Mark all entries as inactive
+    setIsLoading(false);
+    activeAudioRef.current?.pause();
+    activeAudioRef.current = null;
     setTranscript((prev) => prev.map((e) => ({ ...e, isActive: false })));
   }, []);
 
@@ -338,69 +373,36 @@ export function DebateArena({ conflict, decisionContext, stakeholders, onClose }
   // Render helpers
   // ---------------------------------------------------------------------------
 
-  const activeIsA = isRunning && currentSpeaker === 'groupA';
-  const activeIsB = isRunning && currentSpeaker === 'groupB';
+  const activeIsA = (isRunning || isLoading) && currentSpeaker === 'groupA';
+  const activeIsB = (isRunning || isLoading) && currentSpeaker === 'groupB';
 
-  const FighterCard = ({
-    name,
-    side,
-    isActive: active,
-  }: {
-    name: string;
-    side: 'A' | 'B';
-    isActive: boolean;
-  }) => (
+  const FighterCard = ({ name, side, isActive }: { name: string; side: 'A' | 'B'; isActive: boolean }) => (
     <View
       style={[
         styles.fighterCard,
-        side === 'A'
-          ? { borderColor: active ? theme.conflict : theme.outline, alignItems: 'flex-start' }
-          : { borderColor: active ? theme.primary : theme.outline, alignItems: 'flex-end' },
-        active && {
-          backgroundColor: side === 'A' ? theme.conflictContainer : theme.primaryContainer,
+        {
+          borderColor: isActive
+            ? side === 'A' ? theme.conflict : theme.primary
+            : theme.outline,
+          backgroundColor: isActive
+            ? side === 'A' ? theme.conflictContainer : theme.primaryContainer
+            : 'transparent',
         },
       ]}
     >
-      <View style={styles.fighterSideRow}>
-        {side === 'B' && (
-          <ThemedText type="code" style={[styles.fighterSideLabel, { color: theme.primary }]}>
-            {side}
-          </ThemedText>
-        )}
-        <View
-          style={[
-            styles.fighterSideBadge,
-            { backgroundColor: side === 'A' ? theme.conflict : theme.primary },
-          ]}
-        >
-          <ThemedText type="code" style={[styles.fighterSideLetter, { color: theme.surface }]}>
-            {side}
-          </ThemedText>
-        </View>
-        {side === 'A' && (
-          <ThemedText type="code" style={[styles.fighterSideLabel, { color: theme.conflict }]}>
-            {side}
-          </ThemedText>
-        )}
+      <View style={[styles.sideBadge, { backgroundColor: side === 'A' ? theme.conflict : theme.primary }]}>
+        <ThemedText type="code" style={[styles.sideLetter, { color: theme.surface }]}>{side}</ThemedText>
       </View>
       <ThemedText
         type="smallBold"
         numberOfLines={2}
-        style={[
-          styles.fighterName,
-          { color: active ? (side === 'A' ? theme.conflict : theme.primary) : theme.text },
-        ]}
+        style={[styles.fighterName, { color: isActive ? (side === 'A' ? theme.conflict : theme.primary) : theme.text }]}
       >
         {name}
       </ThemedText>
-      {active && (isGenerating || isRunning) && (
-        <Animated.View style={[styles.speakingDot, { transform: [{ scale: pulseAnim }] }]}>
-          <View
-            style={[
-              styles.speakingDotInner,
-              { backgroundColor: side === 'A' ? theme.conflict : theme.primary },
-            ]}
-          />
+      {isActive && (
+        <Animated.View style={[styles.dot, { transform: [{ scale: pulseAnim }] }]}>
+          <View style={[styles.dotInner, { backgroundColor: side === 'A' ? theme.conflict : theme.primary }]} />
         </Animated.View>
       )}
     </View>
@@ -412,13 +414,13 @@ export function DebateArena({ conflict, decisionContext, stakeholders, onClose }
 
   return (
     <View style={[styles.container, { backgroundColor: theme.surface, borderColor: theme.outline }]}>
-      {/* ── Header ── */}
+      {/* Header */}
       <View style={[styles.header, { borderBottomColor: theme.outline }]}>
         <View style={styles.headerLeft}>
           <SymbolView
             name={{ ios: 'flame.fill', android: 'local_fire_department', web: 'local_fire_department' }}
             tintColor={theme.conflict}
-            size={16}
+            size={14}
           />
           <ThemedText type="code" style={[styles.headerTitle, { color: theme.conflict }]}>
             LIVE DEBATE
@@ -430,24 +432,23 @@ export function DebateArena({ conflict, decisionContext, stakeholders, onClose }
               </ThemedText>
             </View>
           )}
+          {(language === 'hi-IN' || language === 'te-IN') && (
+            <View style={[styles.langBadge, { backgroundColor: theme.primaryContainer }]}>
+              <ThemedText type="code" style={[styles.langBadgeText, { color: theme.primary }]}>
+                {language === 'hi-IN' ? 'हिंदी' : 'తెలుగు'}
+              </ThemedText>
+            </View>
+          )}
         </View>
         <Pressable
           onPress={onClose}
-          style={({ pressed }) => [
-            styles.closeBtn,
-            { backgroundColor: theme.backgroundElement },
-            pressed && { opacity: 0.7 },
-          ]}
+          style={({ pressed }) => [styles.closeBtn, { backgroundColor: theme.backgroundElement }, pressed && { opacity: 0.7 }]}
         >
-          <SymbolView
-            name={{ ios: 'xmark', android: 'close', web: 'close' }}
-            tintColor={theme.text}
-            size={14}
-          />
+          <SymbolView name={{ ios: 'xmark', android: 'close', web: 'close' }} tintColor={theme.text} size={14} />
         </Pressable>
       </View>
 
-      {/* ── Conflict context ── */}
+      {/* Conflict reason */}
       <View style={[styles.conflictBanner, { backgroundColor: theme.backgroundElement }]}>
         <ThemedText type="code" style={[styles.conflictLabel, { color: theme.textSecondary }]}>
           CONFLICT:
@@ -457,32 +458,30 @@ export function DebateArena({ conflict, decisionContext, stakeholders, onClose }
         </ThemedText>
       </View>
 
-      {/* ── Fighter cards ── */}
+      {/* Fighter cards */}
       <View style={styles.fightersRow}>
         <FighterCard name={conflict.groupA} side="A" isActive={activeIsA} />
         <View style={styles.vsContainer}>
           <View style={[styles.vsDivider, { backgroundColor: theme.outline }]} />
           <View style={[styles.vsCircle, { backgroundColor: theme.conflict, borderColor: theme.surface }]}>
-            <ThemedText type="code" style={[styles.vsText, { color: theme.surface }]}>
-              VS
-            </ThemedText>
+            <ThemedText type="code" style={[styles.vsText, { color: theme.surface }]}>VS</ThemedText>
           </View>
           <View style={[styles.vsDivider, { backgroundColor: theme.outline }]} />
         </View>
         <FighterCard name={conflict.groupB} side="B" isActive={activeIsB} />
       </View>
 
-      {/* ── Transcript ── */}
+      {/* Transcript */}
       <ScrollView
         ref={scrollRef}
         style={[styles.transcriptScroll, { borderColor: theme.outline }]}
         contentContainerStyle={styles.transcriptContent}
         showsVerticalScrollIndicator={false}
       >
-        {transcript.length === 0 && !isRunning && (
-          <View style={styles.emptyTranscript}>
+        {transcript.length === 0 && !isLoading && (
+          <View style={styles.empty}>
             <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
-              Tap Start Debate to hear these groups clash head-to-head with real voices.
+              Tap Start Debate — they'll fight it out with real voices, no breaks.
             </ThemedText>
           </View>
         )}
@@ -490,29 +489,18 @@ export function DebateArena({ conflict, decisionContext, stakeholders, onClose }
         {transcript.map((entry) => {
           const isA = entry.speaker === 'groupA';
           return (
-            <View
-              key={entry.id}
-              style={[
-                styles.bubbleRow,
-                isA ? styles.bubbleRowLeft : styles.bubbleRowRight,
-              ]}
-            >
+            <View key={entry.id} style={[styles.bubbleRow, isA ? styles.rowLeft : styles.rowRight]}>
               <View
                 style={[
                   styles.bubble,
-                  isA
-                    ? { backgroundColor: theme.conflictContainer, borderColor: theme.conflict + '55' }
-                    : { backgroundColor: theme.primaryContainer, borderColor: theme.primary + '55' },
+                  {
+                    backgroundColor: isA ? theme.conflictContainer : theme.primaryContainer,
+                    borderColor: isA ? theme.conflict + '44' : theme.primary + '44',
+                  },
                   entry.isActive && styles.bubbleActive,
                 ]}
               >
-                <ThemedText
-                  type="code"
-                  style={[
-                    styles.bubbleSpeaker,
-                    { color: isA ? theme.conflict : theme.primary },
-                  ]}
-                >
+                <ThemedText type="code" style={[styles.bubbleName, { color: isA ? theme.conflict : theme.primary }]}>
                   {entry.speakerName}
                 </ThemedText>
                 <ThemedText type="small" style={[styles.bubbleText, { color: theme.text }]}>
@@ -523,38 +511,17 @@ export function DebateArena({ conflict, decisionContext, stakeholders, onClose }
           );
         })}
 
-        {/* Generating indicator */}
-        {isGenerating && (
-          <View
-            style={[
-              styles.generatingRow,
-              currentSpeaker === 'groupA' ? styles.bubbleRowLeft : styles.bubbleRowRight,
-            ]}
-          >
-            <View
-              style={[
-                styles.generatingBubble,
-                currentSpeaker === 'groupA'
-                  ? { backgroundColor: theme.conflictContainer, borderColor: theme.conflict + '55' }
-                  : { backgroundColor: theme.primaryContainer, borderColor: theme.primary + '55' },
-              ]}
-            >
-              <ThemedText
-                type="code"
-                style={[
-                  styles.bubbleSpeaker,
-                  { color: currentSpeaker === 'groupA' ? theme.conflict : theme.primary },
-                ]}
-              >
-                {currentSpeaker === 'groupA' ? conflict.groupA : conflict.groupB}
+        {/* Loading indicator for first turn */}
+        {isLoading && (
+          <View style={[styles.bubbleRow, styles.rowLeft]}>
+            <View style={[styles.bubble, { backgroundColor: theme.conflictContainer, borderColor: theme.conflict + '44' }]}>
+              <ThemedText type="code" style={[styles.bubbleName, { color: theme.conflict }]}>
+                {conflict.groupA}
               </ThemedText>
-              <View style={styles.typingIndicator}>
-                <ActivityIndicator
-                  size="small"
-                  color={currentSpeaker === 'groupA' ? theme.conflict : theme.primary}
-                />
+              <View style={styles.typingRow}>
+                <ActivityIndicator size="small" color={theme.conflict} />
                 <ThemedText type="code" style={[styles.typingText, { color: theme.textSecondary }]}>
-                  formulating rebuttal...
+                  loading argument...
                 </ThemedText>
               </View>
             </View>
@@ -562,33 +529,29 @@ export function DebateArena({ conflict, decisionContext, stakeholders, onClose }
         )}
       </ScrollView>
 
-      {/* ── Error ── */}
+      {/* Error */}
       {errorMessage && (
         <View style={[styles.errorBanner, { backgroundColor: theme.errorContainer }]}>
-          <ThemedText type="code" style={[styles.errorText, { color: theme.error }]}>
+          <ThemedText type="code" style={[styles.errorText, { color: theme.error }]} numberOfLines={2}>
             {errorMessage}
           </ThemedText>
         </View>
       )}
 
-      {/* ── Controls ── */}
+      {/* Controls */}
       <View style={[styles.controls, { borderTopColor: theme.outline }]}>
-        {!isRunning ? (
+        {!isRunning && !isLoading ? (
           <Pressable
             onPress={handleStart}
-            style={({ pressed }) => [
-              styles.startBtn,
-              { backgroundColor: theme.conflict },
-              pressed && { opacity: 0.88 },
-            ]}
+            style={({ pressed }) => [styles.startBtn, { backgroundColor: theme.conflict }, pressed && { opacity: 0.85 }]}
           >
             <SymbolView
               name={{ ios: 'flame.fill', android: 'local_fire_department', web: 'local_fire_department' }}
               tintColor={theme.surface}
-              size={16}
+              size={15}
             />
             <ThemedText type="smallBold" style={[styles.btnText, { color: theme.surface }]}>
-              {transcript.length > 0 ? 'Restart Debate' : 'Start Debate'}
+              {transcript.length > 0 ? 'Restart' : 'Start Debate'}
             </ThemedText>
           </Pressable>
         ) : (
@@ -600,21 +563,14 @@ export function DebateArena({ conflict, decisionContext, stakeholders, onClose }
               pressed && { opacity: 0.8 },
             ]}
           >
-            <SymbolView
-              name={{ ios: 'stop.fill', android: 'stop', web: 'stop' }}
-              tintColor={theme.error}
-              size={16}
-            />
-            <ThemedText type="smallBold" style={[styles.btnText, { color: theme.error }]}>
-              Stop Debate
-            </ThemedText>
+            <SymbolView name={{ ios: 'stop.fill', android: 'stop', web: 'stop' }} tintColor={theme.error} size={15} />
+            <ThemedText type="smallBold" style={[styles.btnText, { color: theme.error }]}>Stop</ThemedText>
           </Pressable>
         )}
       </View>
 
-      {/* Note */}
       <ThemedText type="code" themeColor="textSecondary" style={styles.note}>
-        Voices by ElevenLabs · Arguments by AI · Debate runs until stopped
+        AI voices · Arguments pre-loaded · Runs until stopped
       </ThemedText>
     </View>
   );
@@ -634,7 +590,6 @@ const styles = StyleSheet.create({
     borderRightWidth: 1,
     overflow: 'hidden',
   },
-  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -643,247 +598,88 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.three,
     borderBottomWidth: 1,
   },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-  },
-  headerTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1,
-  },
-  turnBadge: {
-    paddingHorizontal: Spacing.two,
-    paddingVertical: 2,
-    borderRadius: BorderRadius.pill,
-  },
-  turnBadgeText: {
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  closeBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  // Conflict banner
-  conflictBanner: {
-    paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.two,
-    gap: 2,
-  },
-  conflictLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  conflictReason: {
-    fontSize: 12,
-    lineHeight: 17,
-    opacity: 0.85,
-  },
-  // Fighters
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  headerTitle: { fontSize: 11, fontWeight: '700', letterSpacing: 1 },
+  turnBadge: { paddingHorizontal: Spacing.two, paddingVertical: 2, borderRadius: 999 },
+  turnBadgeText: { fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
+  langBadge: { paddingHorizontal: Spacing.two, paddingVertical: 2, borderRadius: 999 },
+  langBadgeText: { fontSize: 9, fontWeight: '700' },
+  closeBtn: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
+  conflictBanner: { paddingHorizontal: Spacing.four, paddingVertical: Spacing.two, gap: 2 },
+  conflictLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
+  conflictReason: { fontSize: 12, lineHeight: 17, opacity: 0.85 },
   fightersRow: {
     flexDirection: 'row',
     alignItems: 'stretch',
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
-    gap: 0,
   },
   fighterCard: {
     flex: 1,
     borderWidth: 1.5,
-    borderRadius: BorderRadius.md,
+    borderRadius: 12,
     padding: Spacing.two,
     gap: Spacing.one,
-    minHeight: 80,
+    minHeight: 76,
     justifyContent: 'space-between',
   },
-  fighterSideRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  fighterSideBadge: {
+  sideBadge: {
     width: 20,
     height: 20,
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  fighterSideLetter: {
-    fontSize: 9,
-    fontWeight: '900',
-  },
-  fighterSideLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  fighterName: {
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 17,
-    fontFamily: undefined,
-  },
-  speakingDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  speakingDotInner: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  vsContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 32,
-    flexShrink: 0,
-  },
-  vsDivider: {
-    flex: 1,
-    width: 1.5,
-  },
+  sideLetter: { fontSize: 9, fontWeight: '900' },
+  fighterName: { fontSize: 12, fontWeight: '700', lineHeight: 16 },
+  dot: { width: 10, height: 10, borderRadius: 5, justifyContent: 'center', alignItems: 'center' },
+  dotInner: { width: 8, height: 8, borderRadius: 4 },
+  vsContainer: { alignItems: 'center', justifyContent: 'center', width: 32, flexShrink: 0 },
+  vsDivider: { flex: 1, width: 1.5 },
   vsCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 2,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginVertical: 4,
+    width: 26, height: 26, borderRadius: 13, borderWidth: 2,
+    justifyContent: 'center', alignItems: 'center', marginVertical: 4,
   },
-  vsText: {
-    fontSize: 8,
-    fontWeight: '900',
-    letterSpacing: 0.5,
-  },
-  // Transcript
+  vsText: { fontSize: 7, fontWeight: '900', letterSpacing: 0.5 },
   transcriptScroll: {
     flex: 1,
     borderTopWidth: 1,
     borderBottomWidth: 1,
     marginHorizontal: Spacing.three,
-    borderRadius: BorderRadius.md,
+    borderRadius: 12,
     marginBottom: Spacing.two,
-    maxHeight: 280,
+    maxHeight: 260,
   },
-  transcriptContent: {
-    padding: Spacing.two,
-    gap: Spacing.two,
-  },
-  emptyTranscript: {
-    padding: Spacing.four,
-    alignItems: 'center',
-  },
-  emptyText: {
-    textAlign: 'center',
-    fontSize: 13,
-    lineHeight: 18,
-    fontStyle: 'italic',
-  },
-  bubbleRow: {
-    flexDirection: 'row',
-  },
-  bubbleRowLeft: {
-    justifyContent: 'flex-start',
-    paddingRight: '20%',
-  },
-  bubbleRowRight: {
-    justifyContent: 'flex-end',
-    paddingLeft: '20%',
-  },
+  transcriptContent: { padding: Spacing.two, gap: Spacing.two },
+  empty: { padding: Spacing.four, alignItems: 'center' },
+  emptyText: { textAlign: 'center', fontSize: 13, lineHeight: 18, fontStyle: 'italic' },
+  bubbleRow: { flexDirection: 'row' },
+  rowLeft: { justifyContent: 'flex-start' },
+  rowRight: { justifyContent: 'flex-end' },
   bubble: {
     borderWidth: 1,
-    borderRadius: BorderRadius.md,
+    borderRadius: 12,
     padding: Spacing.two,
-    gap: 4,
-    maxWidth: '100%',
+    gap: 3,
+    maxWidth: '80%',
+    flexShrink: 1,
   },
-  bubbleActive: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  bubbleSpeaker: {
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  bubbleText: {
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  generatingRow: {
-    flexDirection: 'row',
-  },
-  generatingBubble: {
-    borderWidth: 1,
-    borderRadius: BorderRadius.md,
-    padding: Spacing.two,
-    gap: 4,
-  },
-  typingIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-  },
-  typingText: {
-    fontSize: 11,
-    fontStyle: 'italic',
-  },
-  // Error
-  errorBanner: {
-    marginHorizontal: Spacing.three,
-    marginBottom: Spacing.two,
-    padding: Spacing.two,
-    borderRadius: BorderRadius.sm,
-  },
-  errorText: {
-    fontSize: 11,
-  },
-  // Controls
-  controls: {
-    paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.three,
-    borderTopWidth: 1,
-  },
+  bubbleActive: { elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 4 },
+  bubbleName: { fontSize: 9, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
+  bubbleText: { fontSize: 13, lineHeight: 18, flexShrink: 1 },
+  typingRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  typingText: { fontSize: 11, fontStyle: 'italic' },
+  errorBanner: { marginHorizontal: Spacing.three, marginBottom: Spacing.two, padding: Spacing.two, borderRadius: 8 },
+  errorText: { fontSize: 11 },
+  controls: { paddingHorizontal: Spacing.four, paddingVertical: Spacing.three, borderTopWidth: 1 },
   startBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Spacing.three,
-    borderRadius: BorderRadius.pill,
-    gap: Spacing.two,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingVertical: Spacing.three, borderRadius: 999, gap: Spacing.two,
   },
   stopBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Spacing.three,
-    borderRadius: BorderRadius.pill,
-    gap: Spacing.two,
-    borderWidth: 1.5,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingVertical: Spacing.three, borderRadius: 999, gap: Spacing.two, borderWidth: 1.5,
   },
-  btnText: {
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  note: {
-    fontSize: 9,
-    textAlign: 'center',
-    paddingBottom: Spacing.three,
-    letterSpacing: 0.3,
-  },
+  btnText: { fontSize: 15, fontWeight: '700' },
+  note: { fontSize: 9, textAlign: 'center', paddingBottom: Spacing.three, letterSpacing: 0.3 },
 });
