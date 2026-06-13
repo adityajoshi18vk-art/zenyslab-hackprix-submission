@@ -6,8 +6,6 @@ import Animated, {
   withTiming,
   withSpring,
   Easing,
-  withRepeat,
-  withSequence,
 } from 'react-native-reanimated';
 import { SymbolView } from 'expo-symbols';
 
@@ -28,28 +26,17 @@ export function BlindSpotAlert({ stakeholders }: BlindSpotAlertProps) {
 
   const opacity = useSharedValue(0);
   const translateY = useSharedValue(-16);
-  const pulseAnim = useSharedValue(1);
 
   useEffect(() => {
     if (stakeholders.length > 0) {
       opacity.value = withTiming(1, { duration: 400, easing: Easing.out(Easing.ease) });
       translateY.value = withSpring(0, { damping: 18, stiffness: 200 });
-      
-      // Subtle pulsing animation for the container
-      pulseAnim.value = withRepeat(
-        withSequence(
-          withTiming(1.02, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
-          withTiming(1, { duration: 1500, easing: Easing.inOut(Easing.ease) })
-        ),
-        -1, // Infinite repeat
-        true // Reverse
-      );
     }
-  }, [stakeholders.length, opacity, translateY, pulseAnim]);
+  }, [stakeholders.length, opacity, translateY]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
-    transform: [{ translateY: translateY.value }, { scale: pulseAnim.value }],
+    transform: [{ translateY: translateY.value }],
   }));
 
   if (stakeholders.length === 0) return null;

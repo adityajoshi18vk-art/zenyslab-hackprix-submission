@@ -462,7 +462,7 @@ export default function HomeScreen() {
                     <SymbolView
                       name={{ ios: 'stop.fill', android: 'stop', web: 'stop' }}
                       tintColor={theme.error}
-                      size={36}
+                      size={48}
                     />
                     <ThemedText type="code" style={[styles.micCircleLabel, { color: theme.error }]}>
                       {recordingDuration}s
@@ -479,7 +479,7 @@ export default function HomeScreen() {
                     <SymbolView
                       name={{ ios: 'mic.fill', android: 'mic', web: 'mic' }}
                       tintColor={theme.primary}
-                      size={48}
+                      size={64}
                     />
                   </Pressable>
                 )}
@@ -1142,17 +1142,17 @@ const styles = StyleSheet.create({
     marginTop: Spacing.two,
   },
   micCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
   micCircleActive: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,

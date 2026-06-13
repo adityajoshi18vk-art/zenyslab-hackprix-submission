@@ -51,6 +51,9 @@ export interface VoicePlayerProps {
   speakerName: string;
   voiceQuote: string;
   voiceArchetype?: VoiceArchetype;
+  defaultLanguage?: PlayerLanguage;
+  autoPlay?: boolean;
+  onStateChange?: (state: PlayerState) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -61,10 +64,13 @@ export function VoicePlayer({
   speakerName,
   voiceQuote,
   voiceArchetype = 'default',
+  defaultLanguage = 'English',
+  autoPlay = false,
+  onStateChange,
 }: VoicePlayerProps) {
   const theme = useTheme();
 
-  const [selectedLang, setSelectedLang] = useState<PlayerLanguage>('English');
+  const [selectedLang, setSelectedLang] = useState<PlayerLanguage>(defaultLanguage);
   const [playerState, setPlayerState] = useState<PlayerState>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [position, setPosition] = useState(0);   // milliseconds
@@ -164,6 +170,24 @@ export function VoicePlayer({
       );
     }
   };
+
+  // Trigger onStateChange callback when playback state changes
+  useEffect(() => {
+    if (onStateChange) {
+      onStateChange(playerState);
+    }
+  }, [playerState, onStateChange]);
+
+  // Autoplay if requested on mount
+  useEffect(() => {
+    if (autoPlay) {
+      const timer = setTimeout(() => {
+        loadAndPlay();
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handlePlayPause = async () => {
     if (playerState === 'loading') return;

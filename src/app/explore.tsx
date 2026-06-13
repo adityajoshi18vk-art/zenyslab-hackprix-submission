@@ -152,7 +152,7 @@ export default function HistoryScreen() {
               </View>
             )}
 
-            {simulations.map((sim) => {
+            {simulations.map((sim, index) => {
               const isExpanded = expandedSimId === sim.id;
               const blindSpotCount = sim.stakeholders.filter((s) => s.isOverlooked).length;
               const overlookedStakeholders = sim.stakeholders
@@ -161,7 +161,7 @@ export default function HistoryScreen() {
 
               return (
                 <View
-                  key={sim.id}
+                  key={`${sim.id}-${index}`}
                   style={[
                     styles.simCard,
                     {

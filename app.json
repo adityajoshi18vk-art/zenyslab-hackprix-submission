@@ -30,7 +30,8 @@
           "image": "./assets/splash.png",
           "imageWidth": 250
         }
-      ]
+      ],
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true,
