@@ -1,9 +1,11 @@
+import React, { useEffect } from 'react';
 import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
 import { useColorScheme } from 'react-native';
 import { useFonts } from 'expo-font';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import AppTabs from '@/components/app-tabs';
+import { initSolanaMobileListener } from '@/services/solana';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
@@ -15,6 +17,13 @@ export default function TabLayout() {
     'InstrumentSerif-Regular': 'https://fonts.gstatic.com/s/instrumentserif/v3/pxiGyp84nq_I19dO_F26P9b1P6_6z72q3l8W.ttf',
     'InstrumentSerif-Italic': 'https://fonts.gstatic.com/s/instrumentserif/v3/pxiEyp84nq_I19dO_F26P9b1P6_6z72q3l8W813B.ttf',
   });
+
+  useEffect(() => {
+    const cleanup = initSolanaMobileListener();
+    return () => {
+      if (cleanup) cleanup();
+    };
+  }, []);
 
   if (!fontsLoaded && !fontError) {
     return null;
