@@ -43,7 +43,7 @@
 | `src/services/gemini.ts` | Calls **Gemini 2.0 Flash** with a structured prompt. Returns stakeholders, conflicts, blind spots, and summary as JSON. Uses `responseMimeType: application/json` for reliable output. Handles API errors, empty responses, JSON parse failures. Normalises stakeholder IDs. |
 | `src/services/elevenlabs.ts` | Calls **ElevenLabs TTS** `/v1/text-to-speech/{voiceId}`. Maps 5 archetypes (`student`, `worker`, `authority`, `parent`, `default`) to separate voice IDs via env vars. Returns base64 MP3. Uses `eleven_multilingual_v2` model. |
 | `src/services/sarvam.ts` | Two-step pipeline: (1) POST to Sarvam `/translate` — English → Hindi or Telugu. (2) POST to Sarvam `/text-to-speech` — translated text → audio. Returns base64 WAV. Uses `meera` voice for Hindi, `pavithra` for Telugu. |
-| `src/services/mongodb.ts` | **MongoDB Atlas Data API** (HTTP REST, no SDK). `saveSimulation()`, `listSimulations()`, `deleteSimulation()`. Gracefully returns empty array if not configured (app runs in demo mode). |
+| `src/services/mongodb.ts` | **Express API Server** (HTTP REST). `saveSimulation()`, `listSimulations()`, `deleteSimulation()`. Gracefully returns empty array if not configured (app runs in demo mode). Calls the local `server/` layer. |
 
 ---
 
@@ -53,6 +53,7 @@
 - History screen **loads from MongoDB** on mount and on pull-to-refresh
 - **Falls back to mock data** if MongoDB is not configured
 - **Delete** button on each history record (only shown if `mongoId` is present)
+- **Express Backend (`server/`)**: Added a local Express server to securely connect to MongoDB Atlas using the Node.js driver, as Expo cannot run native Node.js TCP modules.
 
 ---
 
@@ -62,6 +63,8 @@
 - `expo-av` installed via `npx expo install expo-av`
 - `expo-file-system` (legacy API) used for audio cache writes
 - **TypeScript: 0 errors** — confirmed with `npx tsc --noEmit`
+- **Web Audio Fallback** — Created `VoicePlayer.web.tsx` using HTML5 `<audio>` and base64 data URIs for web compatibility.
+- **Sarvam AI Fixes** — Updated deprecated speaker models (`meera` -> `anushka`, `pavithra` -> `arya`) and models (`bulbul:v1` -> `bulbul:v2`).
 
 ---
 
@@ -86,10 +89,13 @@ EXPO_PUBLIC_ELEVENLABS_VOICE_AUTHORITY=
 EXPO_PUBLIC_ELEVENLABS_VOICE_PARENT=
 EXPO_PUBLIC_ELEVENLABS_VOICE_DEFAULT=
 EXPO_PUBLIC_SARVAM_API_KEY=         ← Get from https://sarvam.ai
-EXPO_PUBLIC_MONGODB_DATA_API_URL=   ← Atlas Data API URL
-EXPO_PUBLIC_MONGODB_API_KEY=        ← Atlas API Key
-EXPO_PUBLIC_MONGODB_DATABASE=echo
-EXPO_PUBLIC_MONGODB_COLLECTION=simulations
+
+# Express Server Config
+EXPO_PUBLIC_API_URL=http://localhost:3000
+
+# Server-only config (runs on the Express backend)
+MONGODB_URI=mongodb+srv://...       ← Atlas Connection String
+MONGODB_DATABASE=echo
 ```
 
 > **Without these, the app runs in demo/mock mode** — Gemini is bypassed, voice buttons show an error message.
@@ -108,9 +114,9 @@ EXPO_PUBLIC_MONGODB_COLLECTION=simulations
 ### 🗄️ MongoDB Atlas Setup
 
 1. Go to [mongodb.com/atlas](https://www.mongodb.com/atlas) → Create free cluster
-2. Enable the **Data API**: Cluster → `Data API` → Enable → Create API Key
-3. Copy the `App Services URL` and API key into `.env`
-4. The database and collection (`echo` / `simulations`) will be auto-created on first save
+2. Get your connection string (URI)
+3. Paste the URI into `.env` under `MONGODB_URI`
+4. The database and collection (`echo` / `simulations`) will be auto-created on first save by the Express server.
 
 ---
 
@@ -119,13 +125,12 @@ EXPO_PUBLIC_MONGODB_COLLECTION=simulations
 | Item | Priority | Notes |
 |------|----------|-------|
 | Streaming Gemini response | Medium | Show real-time token streaming instead of waiting for full response |
-| Animated loading bar (Reanimated) | Low | Replace ActivityIndicator with custom animated bars |
 | Share / export simulation | Low | Share analysis as PDF or image |
-| Web audio fix | Medium | `expo-av` audio may not work on web — need HTML5 Audio fallback |
 | Offline cache | Low | Cache last 5 simulations in AsyncStorage for offline access |
 | EAS Build + APK | When ready | `eas build --platform android --profile preview` |
-| App icon + splash screen | Before demo | Replace default Expo icons with Echo branding |
-| `app.json` naming | Low | Update `slug`, `name`, `scheme` to `echo` |
+| Animated loading bar (Reanimated) | DONE | Replaced ActivityIndicator with custom animated bars |
+| App icon + splash screen | DONE | Replaced default Expo icons with Echo branding |
+| `app.json` naming | DONE | Updated `slug`, `name`, `scheme` to `echo` |
 
 ---
 
@@ -133,10 +138,9 @@ EXPO_PUBLIC_MONGODB_COLLECTION=simulations
 
 | Issue | Status |
 |-------|--------|
-| Web audio (`expo-av`) | expo-av audio may silently fail on web — English voice may not play in browser. Hindi/Telugu same issue. |
-| ElevenLabs rate limits | Free tier: 10,000 chars/month. Voice generation per stakeholder per language = ~200 chars. |
+| Web audio (`expo-av`) | FIXED. Web now uses a dedicated HTML5 audio component. |
+| ElevenLabs rate limits | Free tier: 10,000 chars/month. Voice generation per stakeholder per language = ~200 chars. Library voices not supported on free tier API. |
 | Gemini JSON reliability | If Gemini returns malformed JSON, the app shows an error with retry. This is handled gracefully. |
-| MongoDB CORS on web | Atlas Data API requires CORS to be configured if running on web. Set allowed origins in Atlas dashboard. |
 
 ---
 
@@ -149,6 +153,10 @@ hackprix/
 ├── eas.json                  ← EAS Build config
 ├── Echo.md                   ← Original spec
 ├── PROGRESS.md               ← This file
+├── server/                   ← NEW: Express backend for MongoDB
+│   ├── index.js              ← Main server entry
+│   ├── routes/               ← API routes
+│   └── test-e2e.js           ← E2E connectivity test
 ├── src/
 │   ├── app/
 │   │   ├── _layout.tsx
@@ -159,6 +167,7 @@ hackprix/
 │   │   ├── StakeholderCard.tsx     ← Upgraded (Reanimated)
 │   │   ├── BlindSpotAlert.tsx      ← Upgraded (Reanimated)
 │   │   ├── VoicePlayer.tsx         ← Upgraded (expo-av)
+│   │   ├── VoicePlayer.web.tsx     ← NEW: HTML5 audio for web
 │   │   ├── ConflictMap.tsx         ← NEW
 │   │   ├── ErrorState.tsx          ← NEW
 │   │   ├── EmptyState.tsx          ← NEW
@@ -171,5 +180,5 @@ hackprix/
 │       ├── gemini.ts         ← Gemini 2.0 Flash
 │       ├── elevenlabs.ts     ← ElevenLabs TTS
 │       ├── sarvam.ts         ← Sarvam AI Hindi + Telugu
-│       └── mongodb.ts        ← MongoDB Atlas Data API
+│       └── mongodb.ts        ← MongoDB via Express Server
 ```

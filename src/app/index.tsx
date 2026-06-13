@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  ActivityIndicator,
+
   Animated,
   KeyboardAvoidingView,
   Keyboard,
@@ -23,18 +23,13 @@ import { ConflictMap } from '@/components/ConflictMap';
 import { MOCK_SIMULATIONS, SimulationRecord, Stakeholder } from '@/constants/mockData';
 import { useTheme } from '@/hooks/use-theme';
 import { BorderRadius, BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { AnalysisLoader } from '@/components/AnalysisLoader';
 import { analyzeDecision } from '@/services/gemini';
 import { saveSimulation } from '@/services/mongodb';
 
 // ---------------------------------------------------------------------------
-// Loading step messages shown during the Gemini analysis sequence
+// Screen
 // ---------------------------------------------------------------------------
-const LOADING_STEPS = [
-  'Scanning proposal for structural impact...',
-  'Discovering direct and indirect stakeholders...',
-  'Detecting overlooked decision blind spots...',
-  'Mapping stakeholder conflicts and tensions...',
-];
 
 const MAX_PROPOSAL_CHARS = 1000;
 
@@ -49,7 +44,6 @@ export default function HomeScreen() {
   const [proposalText, setProposalText] = useState('');
   const [currentSimulation, setCurrentSimulation] = useState<SimulationRecord | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [loadingStep, setLoadingStep] = useState(0);
   const [selectedStakeholder, setSelectedStakeholder] = useState<Stakeholder | null>(null);
 
   // Error state
@@ -57,18 +51,6 @@ export default function HomeScreen() {
 
   // Bottom sheet animation
   const bottomSheetAnim = useRef(new Animated.Value(0)).current;
-
-  // ---------------------------------------------------------------------------
-  // Loading step ticker — advances every 1.5s while waiting for Gemini
-  // ---------------------------------------------------------------------------
-  useEffect(() => {
-    if (!isLoading) return;
-    if (loadingStep >= LOADING_STEPS.length - 1) return;
-    const timer = setTimeout(() => {
-      setLoadingStep((prev) => prev + 1);
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, [isLoading, loadingStep]);
 
   // ---------------------------------------------------------------------------
   // Bottom sheet helpers
@@ -100,7 +82,6 @@ export default function HomeScreen() {
     setErrorMessage(null);
     setCurrentSimulation(null);
     setIsLoading(true);
-    setLoadingStep(0);
 
     try {
       const hasApiKey = !!process.env.EXPO_PUBLIC_GEMINI_API_KEY;
@@ -112,7 +93,7 @@ export default function HomeScreen() {
         simulation = await analyzeDecision(text);
       } else {
         // Demo mode — keyword-match to mock data
-        await new Promise((resolve) => setTimeout(resolve, LOADING_STEPS.length * 1500));
+        await new Promise((resolve) => setTimeout(resolve, 8000));
         const lowerText = text.toLowerCase();
         if (lowerText.includes('cash') || lowerText.includes('card') || lowerText.includes('digital')) {
           simulation = MOCK_SIMULATIONS[1];
@@ -397,39 +378,7 @@ export default function HomeScreen() {
             {/* ── LOADING STATE ── */}
             {isLoading && (
               <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={theme.primary} />
-                <ThemedText type="smallBold" style={styles.loadingTitle}>
-                  Echo Analysing Decision
-                </ThemedText>
-                <View style={[styles.loadingProgressBox, { backgroundColor: theme.backgroundElement }]}>
-                  {LOADING_STEPS.map((msg, index) => {
-                    const isActive = index === loadingStep;
-                    const isCompleted = index < loadingStep;
-                    return (
-                      <View key={index} style={styles.loadingStepRow}>
-                        <SymbolView
-                          name={{
-                            ios: isCompleted ? 'checkmark.circle.fill' : isActive ? 'arrow.triangle.2.circlepath' : 'circle',
-                            android: isCompleted ? 'check_circle' : isActive ? 'sync' : 'radio_button_unchecked',
-                            web: isCompleted ? 'check_circle' : isActive ? 'sync' : 'radio_button_unchecked',
-                          }}
-                          tintColor={isCompleted ? theme.success : isActive ? theme.primary : theme.textSecondary}
-                          size={16}
-                        />
-                        <ThemedText
-                          type="small"
-                          themeColor={isActive ? 'text' : 'textSecondary'}
-                          style={[
-                            styles.loadingStepText,
-                            isCompleted && { textDecorationLine: 'line-through' },
-                            isActive && { fontWeight: '700' },
-                          ]}>
-                          {msg}
-                        </ThemedText>
-                      </View>
-                    );
-                  })}
-                </View>
+                <AnalysisLoader isAnalyzing={isLoading} />
               </View>
             )}
 
