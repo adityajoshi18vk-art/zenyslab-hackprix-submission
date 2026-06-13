@@ -21,6 +21,9 @@ require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') }
 
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const mongoSanitize = require('express-mongo-sanitize');
 const { MongoClient } = require('mongodb');
 
 const simulationsRouter = require('./routes/simulations');
@@ -47,14 +50,28 @@ if (!MONGODB_URI) {
 // ---------------------------------------------------------------------------
 const app = express();
 
-// Allow any origin in development; tighten this in production
+// Security headers
+app.use(helmet());
+
+// Rate limiting: max 100 requests per 15 minutes per IP
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: 'Too many requests from this IP, please try again later.'
+});
+app.use(limiter);
+
+// Restrict CORS to localhost in dev
 app.use(cors({
-  origin: '*',
+  origin: ['http://localhost:8081', 'http://localhost:3000'],
   methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type'],
 }));
 
 app.use(express.json({ limit: '1mb' }));
+
+// Prevent NoSQL injection
+app.use(mongoSanitize());
 
 // Health check — useful for verifying the server is alive from the Expo app
 app.get('/health', (_req, res) => {

@@ -57,9 +57,6 @@ function base64ToUint8Array(base64: string): Uint8Array {
  * Connects to the Phantom wallet and returns the public key string.
  */
 export const connectPhantom = async (): Promise<string> => {
-  console.log('window.solana:', (window as any)?.solana);
-  console.log('window.phantom:', (window as any)?.phantom);
-
   const provider = getPhantomProvider();
   const response = await provider.connect();
   return response.publicKey.toString();

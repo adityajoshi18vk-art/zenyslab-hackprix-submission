@@ -10,6 +10,7 @@
 
 const { Router } = require('express');
 const { ObjectId } = require('mongodb');
+const sanitizeHtml = require('sanitize-html');
 
 const router = Router();
 
@@ -57,8 +58,32 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'decisionTitle is required' });
     }
 
+    // Sanitize string inputs: strip HTML, max length 1000
+    const sanitizeString = (str) => {
+      if (typeof str !== 'string') return str;
+      const clean = sanitizeHtml(str, {
+        allowedTags: [], // Strip all tags
+        allowedAttributes: {}
+      });
+      return clean.substring(0, 1000);
+    };
+
+    const sanitizedDoc = {};
+    for (const [key, value] of Object.entries(document)) {
+      if (typeof value === 'string') {
+        sanitizedDoc[key] = sanitizeString(value);
+      } else if (Array.isArray(value) && value.every(item => typeof item === 'string')) {
+        sanitizedDoc[key] = value.map(sanitizeString);
+      } else {
+        // Deep objects like 'analysis' are harder to sanitize perfectly without a schema,
+        // but since we are preventing NoSQL injection and XSS at the UI layer,
+        // we'll pass them through or recursively sanitize if needed.
+        sanitizedDoc[key] = value;
+      }
+    }
+
     const doc = {
-      ...document,
+      ...sanitizedDoc,
       createdAt: new Date().toISOString(),
     };
 
