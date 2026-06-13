@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 
 import { ThemedText } from './themed-text';
@@ -9,14 +9,17 @@ import { ConflictPair } from '@/constants/mockData';
 
 export interface ConflictMapProps {
   conflicts: ConflictPair[];
+  /** When provided, a "HEAR THEM DEBATE" button is rendered per conflict row */
+  onDebate?: (conflict: ConflictPair) => void;
 }
 
 /**
  * Renders a clean list of conflict pairs discovered by Gemini.
  * Each row shows Group A ↔ Group B with the reason for their conflict.
  * Color-coded with the conflict token from the design system.
+ * When onDebate is provided, a Debate button is shown per row.
  */
-export function ConflictMap({ conflicts }: ConflictMapProps) {
+export function ConflictMap({ conflicts, onDebate }: ConflictMapProps) {
   const theme = useTheme();
 
   if (!conflicts || conflicts.length === 0) return null;
@@ -75,6 +78,32 @@ export function ConflictMap({ conflicts }: ConflictMapProps) {
             style={[styles.reason, { color: theme.text }]}>
             {conflict.reason}
           </ThemedText>
+
+          {/* Debate trigger button — only shown when handler is provided */}
+          {onDebate && (
+            <Pressable
+              onPress={() => onDebate(conflict)}
+              style={({ pressed }) => [
+                styles.debateBtn,
+                { backgroundColor: theme.conflictContainer, borderColor: theme.conflict + '66' },
+                pressed && { opacity: 0.75 },
+              ]}
+            >
+              <SymbolView
+                name={{ ios: 'flame.fill', android: 'local_fire_department', web: 'local_fire_department' }}
+                tintColor={theme.conflict}
+                size={12}
+              />
+              <ThemedText type="code" style={[styles.debateBtnText, { color: theme.conflict }]}>
+                HEAR THEM DEBATE
+              </ThemedText>
+              <SymbolView
+                name={{ ios: 'speaker.wave.2.fill', android: 'volume_up', web: 'volume_up' }}
+                tintColor={theme.conflict}
+                size={11}
+              />
+            </Pressable>
+          )}
         </View>
       ))}
     </View>
@@ -132,5 +161,22 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     opacity: 0.85,
     marginTop: Spacing.one / 2,
+  },
+  debateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.one,
+    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    borderRadius: BorderRadius.pill,
+    borderWidth: 1,
+    alignSelf: 'flex-start',
+    marginTop: Spacing.one,
+  },
+  debateBtnText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
   },
 });

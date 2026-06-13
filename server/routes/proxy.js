@@ -568,4 +568,96 @@ router.post('/elevenlabs/generate-voice', async (req, res) => {
   }
 });
 
+// ─── 4. DEBATE TURN PROXY ────────────────────────────────────────────────────
+
+/**
+ * Generates one debate turn for a given speaker in a stakeholder conflict.
+ *
+ * Body:
+ *   groupA         - Name of stakeholder group A
+ *   groupB         - Name of stakeholder group B
+ *   decisionContext - The decision title / proposal text
+ *   conflictReason  - The Gemini-generated reason for this conflict pair
+ *   currentSpeaker  - Which group speaks this turn ("groupA" | "groupB")
+ *   history         - Array of { speaker: string, text: string } (last ~6 turns)
+ *
+ * Returns: { text: string } — a single passionate spoken rebuttal (2-3 sentences)
+ */
+router.post('/gemini/debate-turn', async (req, res) => {
+  const { groupA, groupB, decisionContext, conflictReason, currentSpeaker, history } = req.body;
+
+  if (!groupA || !groupB || !decisionContext || !currentSpeaker) {
+    return res.status(400).json({ error: 'groupA, groupB, decisionContext, and currentSpeaker are required.' });
+  }
+
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'Missing API key on server.' });
+  }
+
+  const speakerName = currentSpeaker === 'groupA' ? groupA : groupB;
+  const opponentName = currentSpeaker === 'groupA' ? groupB : groupA;
+
+  // Build the conversation history for context
+  const historyText = (history || [])
+    .slice(-6) // Last 6 turns for context window efficiency
+    .map((turn) => `${turn.speaker}: "${turn.text}"`)
+    .join('\n');
+
+  const systemPrompt = `You are ${speakerName} in a heated public debate about a real policy decision.
+
+Your core conflict: ${conflictReason}
+
+Rules for your response:
+- Speak ONLY as ${speakerName}. Never break character.
+- Be passionate, urgent, and specific to this EXACT decision.
+- Directly rebut what ${opponentName} just said if there is history.
+- Use "I", "we", or "our community" — first-person perspective only.
+- Keep it to 2-3 sentences MAXIMUM. This is spoken audio, not an essay.
+- No filler phrases like "I understand your point" — jump straight into your argument.
+- Reference concrete, real consequences for your group.
+- End on a strong, punchy note. Leave no room for easy counter.`;
+
+  const userPrompt = `Decision being debated: "${decisionContext}"
+
+${historyText ? `Debate so far:\n${historyText}\n\n` : ''}Now speak as ${speakerName} (2-3 sentences, spoken audio style, passionate and direct):`;
+
+  try {
+    const response = await fetch(GROQ_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.85, // Higher temperature for more passionate, varied responses
+        max_tokens: 200,   // Keep turns short and punchy
+      }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      return res.status(response.status).json({ error: `Debate generation error: ${errorBody}` });
+    }
+
+    const data = await response.json();
+    const text = data?.choices?.[0]?.message?.content?.trim();
+
+    if (!text) {
+      return res.status(500).json({ error: 'Debate turn returned an empty response.' });
+    }
+
+    res.json({ text });
+  } catch (err) {
+    console.error('[Proxy debate-turn] Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
+

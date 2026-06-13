@@ -18,8 +18,9 @@ import { StakeholderCard } from '@/components/StakeholderCard';
 import { BlindSpotAlert } from '@/components/BlindSpotAlert';
 import { VoicePlayer } from '@/components/VoicePlayer';
 import { ConflictMap } from '@/components/ConflictMap';
+import { DebateArena } from '@/components/DebateArena';
 import { AccountabilityLedger } from '@/components/AccountabilityLedger';
-import { MOCK_SIMULATIONS, SimulationRecord, Stakeholder } from '@/constants/mockData';
+import { MOCK_SIMULATIONS, SimulationRecord, Stakeholder, ConflictPair } from '@/constants/mockData';
 import { useTheme } from '@/hooks/use-theme';
 import { BorderRadius, BottomTabInset, Fonts, MaxContentWidth, Spacing } from '@/constants/theme';
 import { AnalysisLoader } from '@/components/AnalysisLoader';
@@ -53,6 +54,7 @@ export default function HomeScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedStakeholder, setSelectedStakeholder] = useState<Stakeholder | null>(null);
   const [summaryAudioState, setSummaryAudioState] = useState<'idle' | 'loading' | 'playing' | 'paused' | 'error'>('idle');
+  const [selectedDebateConflict, setSelectedDebateConflict] = useState<ConflictPair | null>(null);
 
   // Summary inline audio refs (web: HTMLAudioElement)
   const summaryAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -365,6 +367,15 @@ export default function HomeScreen() {
     setRawTranscriptText('');
     setErrorMessage(null);
     setSummaryAudioState('idle');
+    setSelectedDebateConflict(null);
+  };
+
+  const handleOpenDebate = (conflict: ConflictPair) => {
+    setSelectedDebateConflict(conflict);
+  };
+
+  const handleCloseDebate = () => {
+    setSelectedDebateConflict(null);
   };
 
   const handleRetry = () => {
@@ -677,7 +688,10 @@ export default function HomeScreen() {
 
               {/* Conflict Map */}
               {displayedSimulation?.conflicts && displayedSimulation.conflicts.length > 0 && (
-                <ConflictMap conflicts={displayedSimulation.conflicts} />
+                <ConflictMap
+                  conflicts={displayedSimulation.conflicts}
+                  onDebate={handleOpenDebate}
+                />
               )}
 
               {/* Accountability Ledger */}
@@ -821,6 +835,7 @@ export default function HomeScreen() {
                         c.groupA === selectedStakeholder.name ||
                         c.groupB === selectedStakeholder.name
                     )}
+                    onDebate={handleOpenDebate}
                   />
                 </View>
               )}
@@ -845,6 +860,38 @@ export default function HomeScreen() {
           </ScrollView>
         </Animated.View>
       )}
+
+      {/* ── DEBATE ARENA OVERLAY ── */}
+      {selectedDebateConflict && currentSimulation && (
+        <>
+          {/* Dark scrim behind arena */}
+          <Animated.View
+            style={[
+              styles.overlay,
+              { backgroundColor: '#000000', opacity: 0.55 },
+            ]}
+          >
+            <Pressable style={styles.overlayPressable} onPress={handleCloseDebate} />
+          </Animated.View>
+
+          {/* Arena panel */}
+          <View style={styles.debateArenaContainer}>
+            <DebateArena
+              conflict={selectedDebateConflict}
+              decisionContext={
+                currentSimulation._englishVersion?.decisionTitle ??
+                currentSimulation.decisionTitle
+              }
+              stakeholders={
+                currentSimulation._englishVersion?.stakeholders ??
+                currentSimulation.stakeholders
+              }
+              onClose={handleCloseDebate}
+            />
+          </View>
+        </>
+      )}
+
     </ThemedView>
   );
 }
@@ -1200,6 +1247,14 @@ const styles = StyleSheet.create({
     marginTop: Spacing.four,
     marginBottom: Spacing.six,
     alignSelf: 'center',
+  },
+  debateArenaContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    maxHeight: '90%',
+    zIndex: 200,
   },
   langSelectorRow: {
     flexDirection: 'row',

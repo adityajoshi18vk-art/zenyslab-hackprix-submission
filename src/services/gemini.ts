@@ -68,3 +68,51 @@ export async function refineTranscript(rawText: string): Promise<string> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Debate feature
+// ---------------------------------------------------------------------------
+
+export interface DebateTurnHistoryEntry {
+  /** Display name of the speaker (group name) */
+  speaker: string;
+  /** What they said */
+  text: string;
+}
+
+export interface GenerateDebateTurnParams {
+  groupA: string;
+  groupB: string;
+  /** The decision title/proposal that is being debated */
+  decisionContext: string;
+  /** The Gemini-generated reason for this specific conflict pair */
+  conflictReason: string;
+  /** Which side speaks this turn */
+  currentSpeaker: 'groupA' | 'groupB';
+  /** Previous debate turns for context (last ~6 used by server) */
+  history: DebateTurnHistoryEntry[];
+}
+
+/**
+ * Generates one passionate debate turn for the current speaker.
+ * Returns a 2-3 sentence spoken rebuttal, audio-ready.
+ */
+export async function generateDebateTurn(params: GenerateDebateTurnParams): Promise<string> {
+  const response = await fetch(`${getApiUrl()}/api/proxy/gemini/debate-turn`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Debate turn error (${response.status}): ${errorBody}`);
+  }
+
+  const data = await response.json();
+  if (data.error) {
+    throw new Error(data.error);
+  }
+  return data.text as string;
+}
+
+
