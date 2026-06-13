@@ -116,27 +116,6 @@ export default function HistoryScreen() {
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.brandRow}>
-            <View style={[styles.brandIcon, { backgroundColor: theme.primaryContainer }]}>
-              <SymbolView
-                name={{ ios: 'clock.fill', android: 'history', web: 'history' } as any}
-                tintColor={theme.primary}
-                size={20}
-              />
-            </View>
-            <View>
-              <ThemedText type="smallBold" style={styles.appName}>
-                Simulation History
-              </ThemedText>
-              <ThemedText type="code" themeColor="textSecondary" style={styles.appTagline}>
-                PREVIOUS DECISION EVALUATIONS
-              </ThemedText>
-            </View>
-          </View>
-        </View>
-
         <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}

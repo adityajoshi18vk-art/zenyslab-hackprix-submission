@@ -17,7 +17,7 @@ import { MaxContentWidth, Spacing } from '@/constants/theme';
 export default function AppTabs() {
   const theme = useTheme();
   return (
-    <Tabs style={{ flex: 1, flexDirection: 'column', height: '100vh', backgroundColor: theme.background }}>
+    <Tabs style={{ flex: 1, flexDirection: 'column', height: '100vh', backgroundColor: theme.background } as any}>
       <TabList asChild>
         <CustomTabList>
           <TabTrigger name="home" href="/" asChild>
@@ -31,7 +31,7 @@ export default function AppTabs() {
           </TabTrigger>
         </CustomTabList>
       </TabList>
-      <TabSlot style={{ flex: 1, overflowY: 'auto' }} />
+      <TabSlot style={{ flex: 1, overflowY: 'auto' } as any} />
     </Tabs>
   );
 }

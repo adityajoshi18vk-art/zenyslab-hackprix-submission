@@ -165,3 +165,67 @@ export async function analyzeDecision(decisionText: string): Promise<SimulationR
     summary: parsed.summary ?? '',
   };
 }
+
+/**
+ * Refines a raw speech-to-text transcript using Gemini 2.0 Flash to correct phonetic and grammatical errors.
+ */
+export async function refineTranscript(rawText: string): Promise<string> {
+  const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+  if (!apiKey) {
+    return rawText;
+  }
+
+  const trimmed = rawText.trim();
+  if (trimmed.length === 0) {
+    return rawText;
+  }
+
+  try {
+    const requestBody = {
+      system_instruction: {
+        parts: [{
+          text: "You are a speech transcription refinement assistant.\n" +
+            "The user spoke a decision proposal in English, Hindi, Telugu, or another language, which was transcribed using an automated tool. The transcription may contain phonetic errors, spelling mistakes, or missing punctuation.\n" +
+            "Your task is to:\n" +
+            "1. Correct all spelling, grammar, phonetic mistakes, and punctuation.\n" +
+            "2. If the input transcript is in Hindi, Telugu, or any other language, translate it into clean, natural English.\n" +
+            "3. Deduce what decision proposal the user was trying to say based on context.\n" +
+            "4. Keep the user's original intent intact.\n" +
+            "5. Output ONLY the refined, clean English transcript. Do not add any conversational text, explanations, or metadata."
+        }],
+      },
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: `Refine this raw transcription of a decision proposal:\n"${trimmed}"` }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.3,
+        topK: 40,
+        topP: 0.95,
+        maxOutputTokens: 1024,
+      },
+    };
+
+    const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      console.warn(`Gemini transcript refinement failed (${response.status})`);
+      return rawText;
+    }
+
+    const data = await response.json();
+    const refined: string | undefined = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    
+    return refined ? refined.trim() : rawText;
+  } catch (error) {
+    console.warn('Error refining transcript with Gemini:', error);
+    return rawText;
+  }
+}
+

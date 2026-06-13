@@ -121,3 +121,75 @@ export async function translateAndSpeak(
 
   return base64Audio;
 }
+
+/**
+ * Transcribes audio file into English text using Sarvam AI.
+ * @param audioInput - Local filesystem URI string (mobile) OR Blob/File (web)
+ * @returns Transcribed text
+ */
+export async function speechToText(
+  audioInput: string | Blob,
+  languageCode: string = 'unknown'
+): Promise<string> {
+  const apiKey = process.env.EXPO_PUBLIC_SARVAM_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      'Missing EXPO_PUBLIC_SARVAM_API_KEY. Please add it to your .env file.'
+    );
+  }
+
+  const formData = new FormData();
+  
+  if (typeof audioInput === 'string') {
+    // Mobile: local file URI
+    const filename = audioInput.split('/').pop() || 'audio.wav';
+    const ext = (filename.split('.').pop() || 'wav').toLowerCase();
+    
+    let type = 'audio/wav';
+    if (ext === 'm4a') {
+      type = 'audio/x-m4a';
+    } else if (ext === 'mp3') {
+      type = 'audio/mpeg';
+    } else if (ext === 'caf') {
+      type = 'audio/x-caf';
+    } else if (ext === '3gp') {
+      type = 'audio/3gpp';
+    } else if (ext === 'webm') {
+      type = 'audio/webm';
+    } else if (ext === 'ogg' || ext === 'opus') {
+      type = 'audio/ogg';
+    }
+
+    formData.append('file', {
+      uri: audioInput,
+      name: filename,
+      type,
+    } as any);
+  } else {
+    // Web: Blob/File object
+    formData.append('file', audioInput, 'audio.webm');
+  }
+  
+  formData.append('model', 'saaras:v3');
+  formData.append('language_code', languageCode);
+
+  const response = await fetch(`${SARVAM_API_BASE}/speech-to-text`, {
+    method: 'POST',
+    headers: {
+      'API-Subscription-Key': apiKey,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Sarvam STT error (${response.status}): ${errorBody}`);
+  }
+
+  const data = await response.json();
+  const transcript: string | undefined = data?.transcript;
+  if (!transcript) {
+    throw new Error('Sarvam STT returned empty transcript.');
+  }
+  return transcript;
+}

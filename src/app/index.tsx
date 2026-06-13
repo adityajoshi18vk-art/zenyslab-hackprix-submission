@@ -1,18 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
-
+  ActivityIndicator,
   Animated,
-  KeyboardAvoidingView,
-  Keyboard,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
-  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SymbolView } from 'expo-symbols';
+import { Audio } from 'expo-av';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -25,28 +23,152 @@ import { MOCK_SIMULATIONS, SimulationRecord, Stakeholder } from '@/constants/moc
 import { useTheme } from '@/hooks/use-theme';
 import { BorderRadius, BottomTabInset, Fonts, MaxContentWidth, Spacing } from '@/constants/theme';
 import { AnalysisLoader } from '@/components/AnalysisLoader';
-import { analyzeDecision } from '@/services/gemini';
+import { analyzeDecision, refineTranscript } from '@/services/gemini';
 import { saveSimulation } from '@/services/mongodb';
-
-// ---------------------------------------------------------------------------
-// Screen
-// ---------------------------------------------------------------------------
-
-const MAX_PROPOSAL_CHARS = 1000;
-
-// ---------------------------------------------------------------------------
-// Screen
-// ---------------------------------------------------------------------------
+import { speechToText } from '@/services/sarvam';
 
 export default function HomeScreen() {
   const theme = useTheme();
 
   // Core state
   const [proposalText, setProposalText] = useState('');
-  const [isInputFocused, setIsInputFocused] = useState(false);
+  const [rawTranscriptText, setRawTranscriptText] = useState('');
+  const [spokenLanguage, setSpokenLanguage] = useState<'unknown' | 'en-IN' | 'hi-IN' | 'te-IN'>('unknown');
   const [currentSimulation, setCurrentSimulation] = useState<SimulationRecord | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedStakeholder, setSelectedStakeholder] = useState<Stakeholder | null>(null);
+
+  // Recording & Transcription State
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [recordingObj, setRecordingObj] = useState<Audio.Recording | null>(null);
+
+  const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mediaRecorderRef = useRef<any>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      if (durationTimerRef.current) {
+        clearInterval(durationTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Audio permission request helper
+  const requestRecordingPermissions = async () => {
+    if (Platform.OS === 'web') return true;
+    const response = await Audio.requestPermissionsAsync();
+    return response.granted;
+  };
+
+  const startRecording = async () => {
+    setErrorMessage(null);
+    setProposalText('');
+    setRawTranscriptText('');
+    try {
+      if (Platform.OS === 'web') {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = mediaRecorder;
+        audioChunksRef.current = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunksRef.current.push(event.data);
+          }
+        };
+
+        mediaRecorder.onstop = async () => {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          stream.getTracks().forEach((track) => track.stop());
+          
+          setIsTranscribing(true);
+          try {
+            const rawText = await speechToText(audioBlob, spokenLanguage);
+            setRawTranscriptText(rawText);
+            const refinedText = await refineTranscript(rawText);
+            setProposalText(refinedText);
+          } catch (err: any) {
+            setErrorMessage(err.message || 'Speech-to-text failed. Check your API key.');
+          } finally {
+            setIsTranscribing(false);
+          }
+        };
+
+        mediaRecorder.start();
+        setIsRecording(true);
+        setRecordingDuration(0);
+        durationTimerRef.current = setInterval(() => {
+          setRecordingDuration((prev) => prev + 1);
+        }, 1000);
+      } else {
+        const hasPermission = await requestRecordingPermissions();
+        if (!hasPermission) {
+          setErrorMessage('Microphone permission denied.');
+          return;
+        }
+
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+        });
+
+        const { recording } = await Audio.Recording.createAsync(
+          Audio.RecordingOptionsPresets.HIGH_QUALITY
+        );
+
+        setRecordingObj(recording);
+        setIsRecording(true);
+        setRecordingDuration(0);
+        durationTimerRef.current = setInterval(() => {
+          setRecordingDuration((prev) => prev + 1);
+        }, 1000);
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to start recording');
+    }
+  };
+
+  const stopRecording = async () => {
+    if (durationTimerRef.current) {
+      clearInterval(durationTimerRef.current);
+      durationTimerRef.current = null;
+    }
+    setIsRecording(false);
+
+    try {
+      if (Platform.OS === 'web') {
+        if (mediaRecorderRef.current) {
+          mediaRecorderRef.current.stop();
+        }
+      } else {
+        if (recordingObj) {
+          await recordingObj.stopAndUnloadAsync();
+          const uri = recordingObj.getURI();
+          setRecordingObj(null);
+
+          if (uri) {
+            setIsTranscribing(true);
+            try {
+              const rawText = await speechToText(uri, spokenLanguage);
+              setRawTranscriptText(rawText);
+              const refinedText = await refineTranscript(rawText);
+              setProposalText(refinedText);
+            } catch (err: any) {
+              setErrorMessage(err.message || 'Speech-to-text failed.');
+            } finally {
+              setIsTranscribing(false);
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to stop recording');
+    }
+  };
 
   // Error state
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -80,7 +202,6 @@ export default function HomeScreen() {
   // Analysis — calls Gemini, saves to MongoDB
   // ---------------------------------------------------------------------------
   const runAnalysis = async (text: string) => {
-    Keyboard.dismiss();
     setErrorMessage(null);
     setCurrentSimulation(null);
     setIsLoading(true);
@@ -126,14 +247,10 @@ export default function HomeScreen() {
     runAnalysis(proposalText.trim());
   };
 
-  const loadTemplate = (text: string) => {
-    setProposalText(text);
-    runAnalysis(text);
-  };
-
   const handleReset = () => {
     setCurrentSimulation(null);
     setProposalText('');
+    setRawTranscriptText('');
     setErrorMessage(null);
   };
 
@@ -162,8 +279,6 @@ export default function HomeScreen() {
     outputRange: [0, 0.45],
   });
 
-  const charCount = proposalText.length;
-  const isOverLimit = charCount > MAX_PROPOSAL_CHARS;
 
   // ---------------------------------------------------------------------------
   // Render
@@ -171,290 +286,251 @@ export default function HomeScreen() {
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.brandRow}>
-            <View style={[styles.brandIcon, { backgroundColor: theme.primaryContainer }]}>
-              <SymbolView
-                name={{ ios: 'waveform.and.mic', android: 'record_voice_over', web: 'record_voice_over' }}
-                tintColor={theme.primary}
-                size={22}
-              />
-            </View>
-            <View>
-              <ThemedText type="smallBold" style={styles.appName}>
-                Echo
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}>
+
+          {/* ── INPUT PANEL ── */}
+          {!currentSimulation && !isLoading && !errorMessage && (
+            <View style={styles.dashboardCard}>
+              <ThemedText type="subtitle" style={styles.welcomeTitle}>
+                Examine Proposed Decisions
               </ThemedText>
-              <ThemedText type="code" themeColor="textSecondary" style={styles.appTagline}>
-                DECISION BLIND SPOT DETECTOR
+              <ThemedText type="small" themeColor="textSecondary" style={styles.welcomeDesc}>
+                Tap the microphone to record your proposed decision. Echo will transcribe your voice using Sarvam AI and surface structural blind spots.
               </ThemedText>
-            </View>
-          </View>
 
-          {currentSimulation && (
-            <Pressable
-              onPress={handleReset}
-              style={({ pressed }) => [
-                styles.headerResetButton,
-                { backgroundColor: theme.backgroundElement },
-                pressed && { opacity: 0.8 },
-              ]}>
-              <SymbolView
-                name={{ ios: 'arrow.counterclockwise', android: 'refresh', web: 'refresh' }}
-                tintColor={theme.text}
-                size={14}
-              />
-              <ThemedText type="code" style={styles.resetText}>New Analysis</ThemedText>
-            </Pressable>
-          )}
-        </View>
-
-        <KeyboardAvoidingView
-          style={styles.keyboardAvoid}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <ScrollView
-            style={styles.scrollView}
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled">
-
-            {/* ── INPUT PANEL ── */}
-            {!currentSimulation && !isLoading && !errorMessage && (
-              <View style={styles.dashboardCard}>
-                <ThemedText type="subtitle" style={styles.welcomeTitle}>
-                  Examine Proposed Decisions
-                </ThemedText>
-                <ThemedText type="small" themeColor="textSecondary" style={styles.welcomeDesc}>
-                  Enter a proposed policy, regulation, or organisational decision. Echo surfaces
-                  every affected stakeholder — including the ones nobody thought to ask.
-                </ThemedText>
-
-                {/* Text input */}
-                <View
-                  style={[
-                    styles.inputContainer,
-                    {
-                      borderColor: isOverLimit
-                        ? theme.error
-                        : isInputFocused
-                          ? theme.primary
-                          : theme.outline,
-                      backgroundColor: theme.inputBackground,
-                      borderWidth: isInputFocused ? 1.5 : 1,
-                    },
-                  ]}>
-                  <TextInput
-                    style={[styles.textInput, { color: theme.text }]}
-                    placeholder="e.g. Mandatory 85% attendance requirement for all courses, excluding internships..."
-                    placeholderTextColor={theme.textSecondary}
-                    multiline
-                    numberOfLines={4}
-                    value={proposalText}
-                    onChangeText={setProposalText}
-                    onFocus={() => setIsInputFocused(true)}
-                    onBlur={() => setIsInputFocused(false)}
-                    maxLength={MAX_PROPOSAL_CHARS + 50} // allow slightly over for visual feedback
-                  />
-                  {/* Character counter */}
-                  <View style={styles.charCountRow}>
-                    <ThemedText
-                      type="code"
+              {/* Language Selector */}
+              <View style={styles.langSelectorRow}>
+                {[
+                  { code: 'unknown', label: 'Auto Detect' },
+                  { code: 'en-IN', label: 'English' },
+                  { code: 'hi-IN', label: 'Hindi' },
+                  { code: 'te-IN', label: 'Telugu' },
+                ].map((lang) => {
+                  const isActive = spokenLanguage === lang.code;
+                  return (
+                    <Pressable
+                      key={lang.code}
+                      onPress={() => setSpokenLanguage(lang.code as any)}
                       style={[
-                        styles.charCount,
-                        { color: isOverLimit ? theme.error : theme.textSecondary },
+                        styles.langPill,
+                        isActive && { backgroundColor: theme.primaryContainer, borderColor: theme.primary },
+                        { borderColor: theme.outline }
                       ]}>
-                      {charCount} / {MAX_PROPOSAL_CHARS}
+                      <ThemedText
+                        type="code"
+                        style={[
+                          styles.langPillText,
+                          isActive ? { color: theme.primary, fontWeight: '700' } : { color: theme.textSecondary }
+                        ]}>
+                        {lang.label}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              {/* Recording interface */}
+              <View style={[styles.recordingArea, { borderColor: theme.outline }]}>
+                {isTranscribing ? (
+                  <View style={styles.loaderContainer}>
+                    <ActivityIndicator color={theme.primary} />
+                    <ThemedText type="code" themeColor="textSecondary" style={styles.statusLabel}>
+                      TRANSCRIBING VOICE VIA SARVAM AI...
                     </ThemedText>
                   </View>
-                </View>
+                ) : isRecording ? (
+                  <Pressable onPress={stopRecording} style={styles.micButtonActive}>
+                    <SymbolView
+                      name={{ ios: 'stop.fill', android: 'stop', web: 'stop' }}
+                      tintColor={theme.error}
+                      size={32}
+                    />
+                    <ThemedText type="code" style={[styles.durationText, { color: theme.error }]}>
+                      RECORDING: {recordingDuration}s
+                    </ThemedText>
+                  </Pressable>
+                ) : (
+                  <Pressable onPress={startRecording} style={({ pressed }) => [styles.micButton, pressed && { opacity: 0.8 }]}>
+                    <SymbolView
+                      name={{ ios: 'mic.fill', android: 'mic', web: 'mic' }}
+                      tintColor={theme.primary}
+                      size={36}
+                    />
+                    <ThemedText type="code" themeColor="textSecondary" style={styles.micLabel}>
+                      TAP TO RECORD DECISION
+                    </ThemedText>
+                  </Pressable>
+                )}
+              </View>
 
-                {/* Analyze button */}
+              {/* Display transcribed proposal */}
+              {proposalText.trim().length > 0 && !isRecording && !isTranscribing && (
+                <View style={[styles.transcriptionBox, { borderLeftColor: theme.primary }]}>
+                  {rawTranscriptText.trim().length > 0 && (
+                    <>
+                      <ThemedText type="code" themeColor="textSecondary" style={styles.transcriptionHeader}>
+                        RAW SPEECH TRANSCRIPT:
+                      </ThemedText>
+                      <ThemedText type="small" themeColor="textSecondary" style={[styles.transcriptionText, { marginBottom: Spacing.two, opacity: 0.8 }]}>
+                        &ldquo;{rawTranscriptText}&rdquo;
+                      </ThemedText>
+                    </>
+                  )}
+                  <ThemedText type="code" themeColor="primary" style={styles.transcriptionHeader}>
+                    REFINED DECISION PROPOSAL (GEMINI):
+                  </ThemedText>
+                  <ThemedText type="small" style={styles.transcriptionText}>
+                    &ldquo;{proposalText}&rdquo;
+                  </ThemedText>
+                </View>
+              )}
+
+              {/* Analyze button */}
+              {proposalText.trim().length > 0 && !isRecording && !isTranscribing && (
                 <Pressable
                   onPress={handleAnalyze}
-                  disabled={proposalText.trim().length === 0 || isOverLimit}
                   style={({ pressed }) => [
                     styles.primaryButton,
                     {
-                      backgroundColor:
-                        proposalText.trim().length === 0 || isOverLimit
-                          ? theme.outline
-                          : theme.primary,
+                      backgroundColor: theme.primary,
                     },
                     pressed && { opacity: 0.9 },
                   ]}>
                   <SymbolView
                     name={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
-                    tintColor={
-                      proposalText.trim().length === 0 || isOverLimit
-                        ? theme.textSecondary
-                        : theme.surface
-                    }
+                    tintColor={theme.surface}
                     size={16}
                   />
-                  <ThemedText
-                    type="smallBold"
-                    style={[
-                      styles.primaryButtonText,
-                      {
-                        color:
-                          proposalText.trim().length === 0 || isOverLimit
-                            ? theme.textSecondary
-                            : theme.surface,
-                      },
-                    ]}>
+                  <ThemedText type="smallBold" style={[styles.primaryButtonText, { color: theme.surface }]}>
                     Analyze Decision
                   </ThemedText>
                 </Pressable>
+              )}
+            </View>
+          )}
 
-                {/* Quick start templates */}
-                <ThemedText type="code" themeColor="textSecondary" style={styles.templateSectionTitle}>
-                  OR TRY AN EXAMPLE:
-                </ThemedText>
-
-                <View style={styles.templateContainer}>
-                  {[
-                    {
-                      label: 'Mandatory 85% Attendance',
-                      text: 'Mandatory 85% attendance policy for all courses',
-                      icon: { ios: 'graduationcap.fill', android: 'school', web: 'school' },
-                    },
-                    {
-                      label: '100% Cashless Campus',
-                      text: 'Transitioning to a 100% cashless campus',
-                      icon: { ios: 'creditcard.fill', android: 'credit_card', web: 'credit_card' },
-                    },
-                    {
-                      label: 'Mandatory Return-to-Office',
-                      text: 'Mandatory return-to-office 5 days a week',
-                      icon: { ios: 'briefcase.fill', android: 'work', web: 'work' },
-                    },
-                  ].map((template) => (
-                    <Pressable
-                      key={template.label}
-                      onPress={() => loadTemplate(template.text)}
-                      style={({ pressed }) => [
-                        styles.templateButton,
-                        { borderBottomColor: theme.outline },
-                        pressed && { backgroundColor: theme.backgroundElement, borderRadius: BorderRadius.md },
-                      ]}>
-                      <SymbolView
-                        name={template.icon as any}
-                        tintColor={theme.primary}
-                        size={16}
-                      />
-                      <ThemedText type="small" style={styles.templateButtonText}>
-                        {template.label}
-                      </ThemedText>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-            )}
-
-            {/* ── ERROR STATE ── */}
-            {errorMessage && !isLoading && (
-              <View style={styles.dashboardCard}>
-                <View style={[styles.errorCard, { backgroundColor: theme.errorContainer, borderColor: theme.error + '40' }]}>
-                  <SymbolView
-                    name={{ ios: 'exclamationmark.triangle.fill', android: 'error', web: 'error' }}
-                    tintColor={theme.error}
-                    size={24}
-                  />
-                  <ThemedText type="smallBold" style={[styles.errorTitle, { color: theme.error }]}>
-                    Analysis Failed
-                  </ThemedText>
-                  <ThemedText type="small" style={[styles.errorDesc, { color: theme.error + 'CC' }]}>
-                    {errorMessage}
-                  </ThemedText>
-                  <Pressable
-                    onPress={handleRetry}
-                    style={({ pressed }) => [
-                      styles.retryButton,
-                      { backgroundColor: theme.error },
-                      pressed && { opacity: 0.85 },
-                    ]}>
-                    <ThemedText type="smallBold" style={{ color: theme.surface }}>
-                      Try Again
-                    </ThemedText>
-                  </Pressable>
-                  <Pressable onPress={handleReset}>
-                    <ThemedText type="linkPrimary" style={styles.backLink}>
-                      ← Back to input
-                    </ThemedText>
-                  </Pressable>
-                </View>
-              </View>
-            )}
-
-            {/* ── LOADING STATE ── */}
-            {isLoading && (
-              <View style={styles.loadingContainer}>
-                <AnalysisLoader isAnalyzing={isLoading} />
-              </View>
-            )}
-
-            {/* ── RESULTS ── */}
-            {currentSimulation && !isLoading && (
-              <View style={styles.resultsContainer}>
-                {/* Proposal Banner */}
-                <View style={[styles.proposalBanner, { borderLeftColor: theme.primary }]}>
-                  <ThemedText type="code" themeColor="primary" style={styles.bannerLabel}>
-                    PROPOSAL UNDER ANALYSIS
-                  </ThemedText>
-                  <ThemedText type="smallBold" style={styles.bannerTitle}>
-                    {currentSimulation.decisionTitle}
-                  </ThemedText>
-                  {currentSimulation.summary && (
-                    <ThemedText type="small" themeColor="textSecondary" style={styles.summaryText}>
-                      {currentSimulation.summary}
-                    </ThemedText>
-                  )}
-                </View>
-
-                {/* Stakeholder Directory */}
-                <View style={styles.directoryHeader}>
-                  <ThemedText type="smallBold" style={styles.directoryTitle}>
-                    Stakeholder Impact Directory
-                  </ThemedText>
-                  <ThemedText type="code" themeColor="textSecondary">
-                    {currentSimulation.stakeholders.length} GROUPS
-                  </ThemedText>
-                </View>
-
-                {currentSimulation.stakeholders.map((stakeholder) => (
-                  <StakeholderCard
-                    key={stakeholder.id}
-                    name={stakeholder.name}
-                    role={stakeholder.role}
-                    impact={stakeholder.impact}
-                    isOverlooked={stakeholder.isOverlooked}
-                    description={stakeholder.description}
-                    onPress={() => openStakeholderDetail(stakeholder)}
-                  />
-                ))}
-
-                {/* Blind Spot Alert */}
-                <BlindSpotAlert stakeholders={overlookedStakeholders} />
-
-                {/* Conflict Map */}
-                {currentSimulation.conflicts && currentSimulation.conflicts.length > 0 && (
-                  <ConflictMap conflicts={currentSimulation.conflicts} />
-                )}
-
-                {/* Accountability Ledger */}
-                <View style={{ marginTop: Spacing.four, borderTopWidth: 1, borderTopColor: theme.outline, paddingTop: Spacing.four, marginBottom: Spacing.two }}>
-                  <ThemedText type="code" themeColor="textSecondary" style={{ fontWeight: '700', letterSpacing: 0.5 }}>
-                    ACCOUNTABILITY
-                  </ThemedText>
-                </View>
-                <AccountabilityLedger 
-                  decision={currentSimulation.decisionTitle} 
-                  blindSpots={overlookedStakeholders.map((s) => s.name)} 
+          {/* ── ERROR STATE ── */}
+          {errorMessage && !isLoading && (
+            <View style={styles.dashboardCard}>
+              <View style={[styles.errorCard, { backgroundColor: theme.errorContainer, borderColor: theme.error + '40' }]}>
+                <SymbolView
+                  name={{ ios: 'exclamationmark.triangle.fill', android: 'error', web: 'error' }}
+                  tintColor={theme.error}
+                  size={24}
                 />
+                <ThemedText type="smallBold" style={[styles.errorTitle, { color: theme.error }]}>
+                  Analysis Failed
+                </ThemedText>
+                <ThemedText type="small" style={[styles.errorDesc, { color: theme.error + 'CC' }]}>
+                  {errorMessage}
+                </ThemedText>
+                <Pressable
+                  onPress={handleRetry}
+                  style={({ pressed }) => [
+                    styles.retryButton,
+                    { backgroundColor: theme.error },
+                    pressed && { opacity: 0.85 },
+                  ]}>
+                  <ThemedText type="smallBold" style={{ color: theme.surface }}>
+                    Try Again
+                  </ThemedText>
+                </Pressable>
+                <Pressable onPress={handleReset}>
+                  <ThemedText type="linkPrimary" style={styles.backLink}>
+                    ← Back to input
+                  </ThemedText>
+                </Pressable>
               </View>
-            )}
-          </ScrollView>
-        </KeyboardAvoidingView>
+            </View>
+          )}
+
+          {/* ── LOADING STATE ── */}
+          {isLoading && (
+            <View style={styles.loadingContainer}>
+              <AnalysisLoader isAnalyzing={isLoading} />
+            </View>
+          )}
+
+          {/* ── RESULTS ── */}
+          {currentSimulation && !isLoading && (
+            <View style={styles.resultsContainer}>
+              {/* Proposal Banner */}
+              <View style={[styles.proposalBanner, { borderLeftColor: theme.primary }]}>
+                <ThemedText type="code" themeColor="primary" style={styles.bannerLabel}>
+                  PROPOSAL UNDER ANALYSIS
+                </ThemedText>
+                <ThemedText type="smallBold" style={styles.bannerTitle}>
+                  {currentSimulation.decisionTitle}
+                </ThemedText>
+                {currentSimulation.summary && (
+                  <ThemedText type="small" themeColor="textSecondary" style={styles.summaryText}>
+                    {currentSimulation.summary}
+                  </ThemedText>
+                )}
+              </View>
+
+              {/* Stakeholder Directory */}
+              <View style={styles.directoryHeader}>
+                <ThemedText type="smallBold" style={styles.directoryTitle}>
+                  Stakeholder Impact Directory
+                </ThemedText>
+                <ThemedText type="code" themeColor="textSecondary">
+                  {currentSimulation.stakeholders.length} GROUPS
+                </ThemedText>
+              </View>
+
+              {currentSimulation.stakeholders.map((stakeholder) => (
+                <StakeholderCard
+                  key={stakeholder.id}
+                  name={stakeholder.name}
+                  role={stakeholder.role}
+                  impact={stakeholder.impact}
+                  isOverlooked={stakeholder.isOverlooked}
+                  description={stakeholder.description}
+                  onPress={() => openStakeholderDetail(stakeholder)}
+                />
+              ))}
+
+              {/* Blind Spot Alert */}
+              <BlindSpotAlert stakeholders={overlookedStakeholders} />
+
+              {/* Conflict Map */}
+              {currentSimulation.conflicts && currentSimulation.conflicts.length > 0 && (
+                <ConflictMap conflicts={currentSimulation.conflicts} />
+              )}
+
+              {/* Accountability Ledger */}
+              <View style={{ marginTop: Spacing.four, borderTopWidth: 1, borderTopColor: theme.outline, paddingTop: Spacing.four, marginBottom: Spacing.two }}>
+                <ThemedText type="code" themeColor="textSecondary" style={{ fontWeight: '700', letterSpacing: 0.5 }}>
+                  ACCOUNTABILITY
+                </ThemedText>
+              </View>
+              <AccountabilityLedger 
+                decision={currentSimulation.decisionTitle} 
+                blindSpots={overlookedStakeholders.map((s) => s.name)} 
+              />
+
+              {/* Reset button at the bottom */}
+              <Pressable
+                onPress={handleReset}
+                style={({ pressed }) => [
+                  styles.resetButtonBottom,
+                  { borderColor: theme.outline },
+                  pressed && { backgroundColor: theme.backgroundElement },
+                ]}>
+                <SymbolView
+                  name={{ ios: 'arrow.counterclockwise', android: 'refresh', web: 'refresh' }}
+                  tintColor={theme.text}
+                  size={14}
+                />
+                <ThemedText type="code" style={{ fontWeight: '700' }}>New Analysis</ThemedText>
+              </Pressable>
+            </View>
+          )}
+        </ScrollView>
       </SafeAreaView>
 
       {/* ── BOTTOM SHEET OVERLAY ── */}
@@ -833,4 +909,91 @@ const styles = StyleSheet.create({
   quoteText: { flex: 1, fontSize: 14, lineHeight: 20 },
   voiceSection: { marginBottom: Spacing.three },
   sarvamNote: { fontSize: 10, lineHeight: 14, textAlign: 'center' },
+  recordingArea: {
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.four,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 160,
+    marginTop: Spacing.two,
+  },
+  loaderContainer: {
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  statusLabel: {
+    fontSize: 11,
+    letterSpacing: 0.5,
+    marginTop: Spacing.two,
+  },
+  micButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    width: '100%',
+  },
+  micButtonActive: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    width: '100%',
+  },
+  micLabel: {
+    fontSize: 11,
+    letterSpacing: 0.5,
+    marginTop: Spacing.two,
+  },
+  durationText: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: Spacing.two,
+  },
+  transcriptionBox: {
+    borderLeftWidth: 3,
+    paddingLeft: Spacing.three,
+    paddingVertical: Spacing.two,
+    marginVertical: Spacing.two,
+  },
+  transcriptionHeader: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginBottom: Spacing.one,
+  },
+  transcriptionText: {
+    fontSize: 14,
+    lineHeight: 20,
+    fontStyle: 'italic',
+  },
+  resetButtonBottom: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: BorderRadius.pill,
+    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.four,
+    gap: Spacing.two,
+    marginTop: Spacing.four,
+    marginBottom: Spacing.six,
+    alignSelf: 'center',
+  },
+  langSelectorRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    marginTop: Spacing.one,
+    flexWrap: 'wrap',
+  },
+  langPill: {
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.one,
+    borderRadius: BorderRadius.pill,
+    borderWidth: 1,
+  },
+  langPillText: {
+    fontSize: 10,
+  },
 });

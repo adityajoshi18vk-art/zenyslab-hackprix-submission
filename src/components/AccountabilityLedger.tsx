@@ -77,7 +77,7 @@ export function AccountabilityLedger({ decision, blindSpots }: AccountabilityLed
         <Animated.View entering={FadeIn} style={styles.stateContainer}>
           <View style={styles.headerRow}>
             <SymbolView name={{ ios: 'book.closed.fill', android: 'menu_book', web: 'menu_book' }} tintColor={theme.primary} size={20} />
-            <ThemedText type="defaultSemiBold">Publish to Accountability Ledger</ThemedText>
+            <ThemedText type="smallBold">Publish to Accountability Ledger</ThemedText>
           </View>
           <ThemedText type="small" themeColor="textSecondary" style={styles.description}>
             Create a permanent on-chain record that these blind spots were seen.
@@ -113,7 +113,7 @@ export function AccountabilityLedger({ decision, blindSpots }: AccountabilityLed
         <Animated.View entering={FadeIn} style={styles.stateContainer}>
           <View style={styles.headerRow}>
             <SymbolView name={{ ios: 'checkmark.seal.fill', android: 'verified', web: 'verified' }} tintColor={theme.success} size={20} />
-            <ThemedText type="defaultSemiBold" style={{ color: theme.success }}>Published to Solana Devnet</ThemedText>
+            <ThemedText type="smallBold" style={{ color: theme.success }}>Published to Solana Devnet</ThemedText>
           </View>
           <View style={[styles.detailsBox, { backgroundColor: theme.backgroundElement }]}>
             <ThemedText type="code" themeColor="textSecondary">Ledger ID: #{signature.substring(0, 8)}...</ThemedText>
@@ -131,7 +131,7 @@ export function AccountabilityLedger({ decision, blindSpots }: AccountabilityLed
         <Animated.View entering={FadeIn} style={styles.stateContainer}>
           <View style={styles.headerRow}>
             <SymbolView name={{ ios: 'exclamationmark.triangle.fill', android: 'warning', web: 'warning' }} tintColor={theme.warning} size={20} />
-            <ThemedText type="defaultSemiBold" style={{ color: theme.warning }}>No Devnet SOL</ThemedText>
+            <ThemedText type="smallBold" style={{ color: theme.warning }}>No Devnet SOL</ThemedText>
           </View>
           <ThemedText type="small" themeColor="textSecondary" style={styles.description}>
             {errorMessage}
@@ -147,7 +147,7 @@ export function AccountabilityLedger({ decision, blindSpots }: AccountabilityLed
         <Animated.View entering={FadeIn} style={styles.stateContainer}>
           <View style={styles.headerRow}>
             <SymbolView name={{ ios: 'xmark.octagon.fill', android: 'error', web: 'error' }} tintColor={theme.error} size={20} />
-            <ThemedText type="defaultSemiBold" style={{ color: theme.error }}>Transaction failed</ThemedText>
+            <ThemedText type="smallBold" style={{ color: theme.error }}>Transaction failed</ThemedText>
           </View>
           <ThemedText type="small" themeColor="textSecondary" style={styles.description}>{errorMessage}</ThemedText>
           <Pressable onPress={() => setState('idle')} style={[styles.outlineButton, { borderColor: theme.error }]}>

@@ -53,27 +53,6 @@ export default function AboutScreen() {
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.brandRow}>
-            <View style={[styles.brandIcon, { backgroundColor: theme.primaryContainer }]}>
-              <SymbolView
-                name={{ ios: 'waveform.and.mic', android: 'record_voice_over', web: 'record_voice_over' }}
-                tintColor={theme.primary}
-                size={22}
-              />
-            </View>
-            <View>
-              <ThemedText type="smallBold" style={styles.appName}>
-                Echo
-              </ThemedText>
-              <ThemedText type="code" themeColor="textSecondary" style={styles.appTagline}>
-                DECISION BLIND SPOT DETECTOR
-              </ThemedText>
-            </View>
-          </View>
-        </View>
-
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
