@@ -9,7 +9,6 @@ import Animated, {
   FadeOut,
   FadeIn
 } from 'react-native-reanimated';
-import { LinearGradient } from 'expo-linear-gradient';
 import { ThemedText } from './themed-text';
 import { useTheme } from '@/hooks/use-theme';
 import { BorderRadius, Spacing } from '@/constants/theme';
@@ -70,14 +69,7 @@ export function AnalysisLoader({ isAnalyzing }: AnalysisLoaderProps) {
       style={styles.container}
     >
       <View style={[styles.barBackground, { backgroundColor: theme.outline }]}>
-        <Animated.View style={[styles.barFill, progressStyle]}>
-          <LinearGradient
-            colors={['#4F6EF7', '#8B5CF6']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.gradient}
-          />
-        </Animated.View>
+        <Animated.View style={[styles.barFill, progressStyle, { backgroundColor: theme.primary }]} />
       </View>
       
       <View style={styles.textContainer}>
@@ -106,11 +98,6 @@ const styles = StyleSheet.create({
   },
   barFill: {
     height: '100%',
-    shadowColor: '#4F6EF7',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 4,
-    elevation: 4,
   },
   gradient: {
     flex: 1,

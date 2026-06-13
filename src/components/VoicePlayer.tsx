@@ -202,7 +202,7 @@ export function VoicePlayer({
         : { ios: 'play.fill', android: 'play_arrow', web: 'play_arrow' };
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.backgroundElement, borderColor: theme.outline }]}>
+    <View style={[styles.container, { borderBottomColor: theme.outline }]}>
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.voiceInfo}>
@@ -314,16 +314,11 @@ export function VoicePlayer({
 
 const styles = StyleSheet.create({
   container: {
-    padding: Spacing.four,
-    borderRadius: BorderRadius.xl,
-    borderWidth: 1,
+    paddingVertical: Spacing.four,
+    paddingHorizontal: Spacing.one,
+    borderBottomWidth: 1,
     alignSelf: 'stretch',
     gap: Spacing.three,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 2,
   },
   header: {
     flexDirection: 'row',
@@ -389,11 +384,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     flexShrink: 0,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
   },
   progressSection: {
     flex: 1,

@@ -270,12 +270,6 @@ export default function HistoryScreen() {
                         </>
                       )}
 
-                      <BlindSpotAlert stakeholders={overlookedStakeholders} />
-
-                      {sim.conflicts && sim.conflicts.length > 0 && (
-                        <ConflictMap conflicts={sim.conflicts} />
-                      )}
-
                       <ThemedText
                         type="code"
                         themeColor="textSecondary"
@@ -294,6 +288,12 @@ export default function HistoryScreen() {
                           onPress={() => openStakeholderDetail(sim, sh)}
                         />
                       ))}
+
+                      <BlindSpotAlert stakeholders={overlookedStakeholders} />
+
+                      {sim.conflicts && sim.conflicts.length > 0 && (
+                        <ConflictMap conflicts={sim.conflicts} />
+                      )}
 
                       {/* Delete button — only for MongoDB-persisted records */}
                       {sim.mongoId && (
@@ -402,7 +402,7 @@ export default function HistoryScreen() {
               <ThemedText type="code" themeColor="textSecondary" style={styles.sectionTitle}>
                 GENERATED PERSPECTIVE NARRATIVE:
               </ThemedText>
-              <View style={[styles.quoteContainer, { backgroundColor: theme.background, borderColor: theme.outline }]}>
+              <View style={[styles.quoteContainer, { borderLeftColor: theme.primary + '66' }]}>
                 <SymbolView
                   name={{ ios: 'quote.bubble.fill', android: 'format_quote', web: 'format_quote' }}
                   tintColor={theme.primary + '33'}
@@ -606,9 +606,9 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
   sheetDesc: { fontSize: 14, lineHeight: 20 },
   quoteContainer: {
-    padding: Spacing.three,
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
+    paddingVertical: Spacing.two,
+    paddingLeft: Spacing.three,
+    borderLeftWidth: 2,
     flexDirection: 'row',
     gap: Spacing.two,
     alignItems: 'flex-start',

@@ -397,7 +397,7 @@ export default function HomeScreen() {
             {currentSimulation && !isLoading && (
               <View style={styles.resultsContainer}>
                 {/* Proposal Banner */}
-                <View style={[styles.proposalBanner, { backgroundColor: theme.surface, borderColor: theme.outline }]}>
+                <View style={[styles.proposalBanner, { borderLeftColor: theme.primary }]}>
                   <ThemedText type="code" themeColor="primary" style={styles.bannerLabel}>
                     PROPOSAL UNDER ANALYSIS
                   </ThemedText>
@@ -410,14 +410,6 @@ export default function HomeScreen() {
                     </ThemedText>
                   )}
                 </View>
-
-                {/* Blind Spot Alert */}
-                <BlindSpotAlert stakeholders={overlookedStakeholders} />
-
-                {/* Conflict Map */}
-                {currentSimulation.conflicts && currentSimulation.conflicts.length > 0 && (
-                  <ConflictMap conflicts={currentSimulation.conflicts} />
-                )}
 
                 {/* Stakeholder Directory */}
                 <View style={styles.directoryHeader}>
@@ -440,6 +432,14 @@ export default function HomeScreen() {
                     onPress={() => openStakeholderDetail(stakeholder)}
                   />
                 ))}
+
+                {/* Blind Spot Alert */}
+                <BlindSpotAlert stakeholders={overlookedStakeholders} />
+
+                {/* Conflict Map */}
+                {currentSimulation.conflicts && currentSimulation.conflicts.length > 0 && (
+                  <ConflictMap conflicts={currentSimulation.conflicts} />
+                )}
 
                 {/* Accountability Ledger */}
                 <View style={{ marginTop: Spacing.four, borderTopWidth: 1, borderTopColor: theme.outline, paddingTop: Spacing.four, marginBottom: Spacing.two }}>
@@ -537,7 +537,7 @@ export default function HomeScreen() {
               <ThemedText type="code" themeColor="textSecondary" style={styles.sectionTitle}>
                 GENERATED PERSPECTIVE NARRATIVE:
               </ThemedText>
-              <View style={[styles.quoteContainer, { backgroundColor: theme.background, borderColor: theme.outline }]}>
+              <View style={[styles.quoteContainer, { borderLeftColor: theme.primary + '66' }]}>
                 <SymbolView
                   name={{ ios: 'quote.bubble.fill', android: 'format_quote', web: 'format_quote' }}
                   tintColor={theme.primary + '33'}
@@ -741,10 +741,10 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
   },
   proposalBanner: {
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    padding: Spacing.three,
-    marginBottom: Spacing.three,
+    borderLeftWidth: 3,
+    paddingLeft: Spacing.three,
+    paddingVertical: Spacing.two,
+    marginBottom: Spacing.four,
     gap: Spacing.one,
   },
   bannerLabel: { fontSize: 10, fontWeight: '700' },
@@ -822,9 +822,9 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
   sheetDesc: { fontSize: 14, lineHeight: 20 },
   quoteContainer: {
-    padding: Spacing.three,
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
+    paddingVertical: Spacing.two,
+    paddingLeft: Spacing.three,
+    borderLeftWidth: 2,
     flexDirection: 'row',
     gap: Spacing.two,
     alignItems: 'flex-start',

@@ -13,7 +13,7 @@ import { SymbolView } from 'expo-symbols';
 
 import { ThemedText } from './themed-text';
 import { useTheme } from '@/hooks/use-theme';
-import { BorderRadius, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 
 export interface BlindSpotAlertProps {
   stakeholders: { name: string; reason: string }[];
@@ -88,8 +88,7 @@ export function BlindSpotAlert({ stakeholders }: BlindSpotAlertProps) {
             style={[
               styles.card,
               {
-                backgroundColor: theme.surface,
-                borderColor: theme.warning + '40',
+                borderLeftColor: theme.warning + '80',
               },
             ]}>
             <View style={styles.cardHeader}>
@@ -114,20 +113,13 @@ export function BlindSpotAlert({ stakeholders }: BlindSpotAlertProps) {
 
 const styles = StyleSheet.create({
   container: {
-    paddingVertical: Spacing.three,
+    paddingVertical: Spacing.four,
     paddingRight: Spacing.three,
     paddingLeft: Spacing.four + 2,
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
     alignSelf: 'stretch',
     marginBottom: Spacing.three,
     gap: Spacing.three,
     overflow: 'hidden',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 6,
-    elevation: 1,
   },
   leftAccentBar: {
     position: 'absolute',
@@ -157,9 +149,9 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   card: {
-    padding: Spacing.three,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
+    paddingVertical: Spacing.two,
+    paddingLeft: Spacing.three,
+    borderLeftWidth: 2,
     gap: Spacing.one,
   },
   cardHeader: {

@@ -81,11 +81,11 @@ export default function AboutScreen() {
           <View style={styles.contentWrapper}>
 
             {/* Hero */}
-            <View style={[styles.heroCard, { backgroundColor: theme.primaryContainer }]}>
-              <ThemedText type="subtitle" style={[styles.heroTitle, { color: theme.primary }]}>
+            <View style={[styles.heroCard, { borderBottomColor: theme.outline }]}>
+              <ThemedText type="subtitle" style={[styles.heroTitle, { color: theme.text }]}>
                 Before making a decision, hear from the people nobody thought to ask.
               </ThemedText>
-              <ThemedText type="small" style={[styles.heroBody, { color: theme.primary }]}>
+              <ThemedText type="small" style={[styles.heroBody, { color: theme.textSecondary }]}>
                 Echo is an AI-powered tool that identifies overlooked stakeholders, maps structural
                 conflicts, and surfaces perspectives that decision-makers routinely miss.
               </ThemedText>
@@ -241,9 +241,9 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   heroCard: {
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.four,
-    marginBottom: Spacing.three,
+    paddingVertical: Spacing.four,
+    borderBottomWidth: 1,
+    marginBottom: Spacing.four,
     gap: Spacing.two,
   },
   heroTitle: {
@@ -255,7 +255,6 @@ const styles = StyleSheet.create({
   heroBody: {
     fontSize: 14,
     lineHeight: 20,
-    opacity: 0.85,
   },
   sectionTitle: {
     fontFamily: Fonts.serif.regular,
@@ -269,10 +268,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: Spacing.three,
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    padding: Spacing.three,
-    marginBottom: Spacing.two,
+    borderBottomWidth: 1,
+    paddingVertical: Spacing.four,
   },
   featureIcon: {
     width: 36,
@@ -289,10 +286,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.three,
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    padding: Spacing.three,
-    marginBottom: Spacing.two,
+    borderBottomWidth: 1,
+    paddingVertical: Spacing.three,
   },
   techIconWrap: {
     width: 40,
@@ -306,9 +301,9 @@ const styles = StyleSheet.create({
   techName: { fontSize: 14 },
   techDesc: { fontSize: 12, lineHeight: 16 },
   philosophyCard: {
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    padding: Spacing.four,
+    borderLeftWidth: 3,
+    paddingVertical: Spacing.three,
+    paddingLeft: Spacing.four,
     marginTop: Spacing.three,
     gap: Spacing.two,
   },

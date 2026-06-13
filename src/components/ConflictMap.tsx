@@ -40,14 +40,13 @@ export function ConflictMap({ conflicts }: ConflictMapProps) {
           style={[
             styles.conflictRow,
             {
-              backgroundColor: theme.conflictContainer,
-              borderColor: theme.conflict + '30',
+              borderBottomColor: theme.outline,
             },
           ]}>
           {/* Connection flow row */}
           <View style={styles.flowRow}>
             {/* Group A */}
-            <View style={[styles.groupChip, { backgroundColor: theme.surface, borderColor: theme.conflict + '20' }]}>
+            <View style={[styles.groupChip, { backgroundColor: theme.backgroundElement }]}>
               <ThemedText type="smallBold" style={[styles.groupName, { color: theme.conflict }]}>
                 {conflict.groupA}
               </ThemedText>
@@ -63,7 +62,7 @@ export function ConflictMap({ conflicts }: ConflictMapProps) {
             </View>
 
             {/* Group B */}
-            <View style={[styles.groupChip, { backgroundColor: theme.surface, borderColor: theme.conflict + '20' }]}>
+            <View style={[styles.groupChip, { backgroundColor: theme.backgroundElement }]}>
               <ThemedText type="smallBold" style={[styles.groupName, { color: theme.conflict }]}>
                 {conflict.groupB}
               </ThemedText>
@@ -100,17 +99,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   conflictRow: {
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    padding: Spacing.three,
+    borderBottomWidth: 1,
+    paddingVertical: Spacing.three,
+    paddingHorizontal: Spacing.one,
     gap: Spacing.two,
     flexDirection: 'column',
     alignItems: 'stretch',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 6,
-    elevation: 1,
   },
   flowRow: {
     flexDirection: 'row',
@@ -120,9 +114,8 @@ const styles = StyleSheet.create({
   },
   groupChip: {
     paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.one,
+    paddingVertical: Spacing.one / 2,
     borderRadius: BorderRadius.sm,
-    borderWidth: 1,
     flexShrink: 1,
   },
   groupName: {

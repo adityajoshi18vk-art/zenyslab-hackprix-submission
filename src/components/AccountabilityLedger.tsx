@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, Pressable, ActivityIndicator, Linking as RNLinking } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { SymbolView } from 'expo-symbols';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, Easing, FadeIn } from 'react-native-reanimated';
 
@@ -72,7 +71,7 @@ export function AccountabilityLedger({ decision, blindSpots }: AccountabilityLed
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.surface, borderColor: theme.outline }]}>
+    <View style={[styles.container, { borderBottomColor: theme.outline }]}>
       {/* State 1: Idle */}
       {state === 'idle' && (
         <Animated.View entering={FadeIn} style={styles.stateContainer}>
@@ -83,10 +82,10 @@ export function AccountabilityLedger({ decision, blindSpots }: AccountabilityLed
           <ThemedText type="small" themeColor="textSecondary" style={styles.description}>
             Create a permanent on-chain record that these blind spots were seen.
           </ThemedText>
-          <Pressable onPress={handleConnectAndPublish} style={styles.buttonWrapper}>
-            <LinearGradient colors={['#4F6EF7', '#8B5CF6']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradientButton}>
-              <ThemedText type="smallBold" style={styles.buttonText}>Connect Phantom Wallet</ThemedText>
-            </LinearGradient>
+          <Pressable onPress={handleConnectAndPublish} style={[styles.buttonWrapper, { backgroundColor: theme.primary }]}>
+            <View style={styles.gradientButton}>
+              <ThemedText type="smallBold" style={[styles.buttonText, { color: theme.surface }]}>Connect Phantom Wallet</ThemedText>
+            </View>
           </Pressable>
         </Animated.View>
       )}
@@ -104,9 +103,7 @@ export function AccountabilityLedger({ decision, blindSpots }: AccountabilityLed
         <Animated.View entering={FadeIn} style={styles.centeredState}>
           <ThemedText type="small" themeColor="textSecondary" style={styles.loadingText}>Publishing to Solana devnet...</ThemedText>
           <View style={[styles.barBackground, { backgroundColor: theme.outline }]}>
-            <Animated.View style={[styles.barFill, progressStyle]}>
-              <LinearGradient colors={['#4F6EF7', '#8B5CF6']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradient} />
-            </Animated.View>
+            <Animated.View style={[styles.barFill, progressStyle, { backgroundColor: theme.primary }]} />
           </View>
         </Animated.View>
       )}
@@ -115,13 +112,13 @@ export function AccountabilityLedger({ decision, blindSpots }: AccountabilityLed
       {state === 'published' && signature && (
         <Animated.View entering={FadeIn} style={styles.stateContainer}>
           <View style={styles.headerRow}>
-            <SymbolView name={{ ios: 'checkmark.seal.fill', android: 'verified', web: 'verified' }} tintColor="#10B981" size={20} />
-            <ThemedText type="defaultSemiBold" style={{ color: '#10B981' }}>Published to Solana Devnet</ThemedText>
+            <SymbolView name={{ ios: 'checkmark.seal.fill', android: 'verified', web: 'verified' }} tintColor={theme.success} size={20} />
+            <ThemedText type="defaultSemiBold" style={{ color: theme.success }}>Published to Solana Devnet</ThemedText>
           </View>
-          <View style={styles.detailsBox}>
+          <View style={[styles.detailsBox, { backgroundColor: theme.backgroundElement }]}>
             <ThemedText type="code" themeColor="textSecondary">Ledger ID: #{signature.substring(0, 8)}...</ThemedText>
             <ThemedText type="code" themeColor="textSecondary">{blindSpots.length} blind spots recorded</ThemedText>
-            <ThemedText type="code" themeColor="textSecondary">Signed by: 7xKp...mQ</ThemedText>
+            <ThemedText type="code" themeColor="textSecondary">Signed by: {walletAddress ? `${walletAddress.substring(0, 6)}...${walletAddress.substring(walletAddress.length - 4)}` : '7xKp...mQ'}</ThemedText>
           </View>
           <Pressable onPress={handleViewExplorer} style={[styles.outlineButton, { borderColor: theme.primary }]}>
             <ThemedText type="smallBold" style={{ color: theme.primary }}>View on Solana Explorer →</ThemedText>
@@ -133,14 +130,14 @@ export function AccountabilityLedger({ decision, blindSpots }: AccountabilityLed
       {state === 'no_sol' && (
         <Animated.View entering={FadeIn} style={styles.stateContainer}>
           <View style={styles.headerRow}>
-            <SymbolView name={{ ios: 'exclamationmark.triangle.fill', android: 'warning', web: 'warning' }} tintColor="#F59E0B" size={20} />
-            <ThemedText type="defaultSemiBold" style={{ color: '#F59E0B' }}>No Devnet SOL</ThemedText>
+            <SymbolView name={{ ios: 'exclamationmark.triangle.fill', android: 'warning', web: 'warning' }} tintColor={theme.warning} size={20} />
+            <ThemedText type="defaultSemiBold" style={{ color: theme.warning }}>No Devnet SOL</ThemedText>
           </View>
           <ThemedText type="small" themeColor="textSecondary" style={styles.description}>
             {errorMessage}
           </ThemedText>
-          <Pressable onPress={() => setState('idle')} style={[styles.outlineButton, { borderColor: '#F59E0B' }]}>
-            <ThemedText type="smallBold" style={{ color: '#F59E0B' }}>Try Again</ThemedText>
+          <Pressable onPress={() => setState('idle')} style={[styles.outlineButton, { borderColor: theme.warning }]}>
+            <ThemedText type="smallBold" style={{ color: theme.warning }}>Try Again</ThemedText>
           </Pressable>
         </Animated.View>
       )}
@@ -164,10 +161,10 @@ export function AccountabilityLedger({ decision, blindSpots }: AccountabilityLed
 
 const styles = StyleSheet.create({
   container: {
-    padding: Spacing.four,
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    marginTop: Spacing.four,
+    paddingVertical: Spacing.four,
+    paddingHorizontal: Spacing.one,
+    borderBottomWidth: 1,
+    marginTop: Spacing.two,
     marginBottom: Spacing.six,
   },
   stateContainer: {
@@ -229,7 +226,6 @@ const styles = StyleSheet.create({
   },
   detailsBox: {
     padding: Spacing.three,
-    backgroundColor: 'rgba(255,255,255,0.03)',
     borderRadius: BorderRadius.md,
     gap: Spacing.two,
   }
