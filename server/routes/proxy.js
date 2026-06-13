@@ -9,7 +9,7 @@ const multer = require('multer');
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const SARVAM_API_BASE = 'https://api.sarvam.ai';
 const ELEVENLABS_API_BASE = 'https://api.elevenlabs.io/v1';
 
@@ -53,7 +53,8 @@ Return ONLY a valid JSON object (no markdown, no explanation) with this exact sh
     }
   ],
   "blindSpots": ["Group name 1", "Group name 2"],
-  "summary": "Two-sentence overall analysis of this decision's impact."
+  "summary": "Two-sentence overall analysis of this decision's impact.",
+  "conflictSummary": "A 3-4 sentence audio-ready spoken summary. Briefly state what the decision aims to do and who it benefits. Then name the key conflict or tension between stakeholder groups and explain what is at stake. Finally, call out the overlooked groups by name and describe the hardship this decision creates for them."
 }
 
 Include 5-9 stakeholder groups. Include 1-3 conflict pairs if they exist.
@@ -68,63 +69,54 @@ router.post('/gemini/analyze', async (req, res) => {
     return res.status(400).json({ error: 'Decision text is too short. Please provide more detail.' });
   }
 
-  const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: 'Missing Gemini API key on server.' });
+    return res.status(500).json({ error: 'Missing API key on server.' });
   }
 
   try {
     const requestBody = {
-      system_instruction: {
-        parts: [{ text: GEMINI_SYSTEM_INSTRUCTION }],
-      },
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: GEMINI_PROMPT_TEMPLATE(decisionText.trim()) }],
-        },
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: GEMINI_SYSTEM_INSTRUCTION },
+        { role: 'user', content: GEMINI_PROMPT_TEMPLATE(decisionText.trim()) },
       ],
-      generationConfig: {
-        temperature: 0.7,
-        topK: 40,
-        topP: 0.95,
-        maxOutputTokens: 8192,
-        responseMimeType: 'application/json',
-        thinkingConfig: {
-          thinkingBudget: 0,
-        },
-      },
+      temperature: 0.7,
+      max_tokens: 8192,
+      response_format: { type: 'json_object' },
     };
 
-    const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
+    const response = await fetch(GROQ_API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
       body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
       const errorBody = await response.text();
-      return res.status(response.status).json({ error: `Gemini API error: ${errorBody}` });
+      return res.status(response.status).json({ error: `Analysis error: ${errorBody}` });
     }
 
     const data = await response.json();
-    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const rawText = data?.choices?.[0]?.message?.content;
 
     if (!rawText) {
-      return res.status(500).json({ error: 'Gemini returned an empty response.' });
+      return res.status(500).json({ error: 'Analysis returned an empty response.' });
     }
 
-    // Parse the JSON from the response text
     let parsed;
     try {
       const cleaned = rawText.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
       parsed = JSON.parse(cleaned);
     } catch (e) {
-      return res.status(500).json({ error: 'Failed to parse Gemini response as JSON.' });
+      return res.status(500).json({ error: 'Failed to parse analysis response as JSON.' });
     }
 
     if (!Array.isArray(parsed.stakeholders) || parsed.stakeholders.length === 0) {
-      return res.status(500).json({ error: 'Gemini returned an invalid stakeholder list.' });
+      return res.status(500).json({ error: 'Analysis returned an invalid stakeholder list.' });
     }
 
     const normalised = parsed.stakeholders.map((s, i) => ({
@@ -145,9 +137,10 @@ router.post('/gemini/analyze', async (req, res) => {
       conflicts: parsed.conflicts ?? [],
       blindSpots: parsed.blindSpots ?? [],
       summary: parsed.summary ?? '',
+      conflictSummary: parsed.conflictSummary ?? '',
     });
   } catch (err) {
-    console.error('[Proxy Gemini analyze] Error:', err);
+    console.error('[Proxy analyze] Error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -159,56 +152,56 @@ router.post('/gemini/refine', async (req, res) => {
     return res.json({ refinedText: '' });
   }
 
-  const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: 'Missing Gemini API key on server.' });
+    return res.status(500).json({ error: 'Missing API key on server.' });
   }
 
   try {
     const requestBody = {
-      system_instruction: {
-        parts: [{
-          text: "You are a speech transcription refinement assistant.\n" +
-            "The user spoke a decision proposal in English, Hindi, Telugu, or another language, which was transcribed using an automated tool. The transcription may contain phonetic errors, spelling mistakes, or missing punctuation.\n" +
-            "Your task is to:\n" +
-            "1. Correct all spelling, grammar, phonetic mistakes, and punctuation.\n" +
-            "2. If the input transcript is in Hindi, Telugu, or any other language, translate it into clean, natural English.\n" +
-            "3. Deduce what decision proposal the user was trying to say based on context.\n" +
-            "4. Keep the user's original intent intact.\n" +
-            "5. Output ONLY the refined, clean English transcript. Do not add any conversational text, explanations, or metadata."
-        }],
-      },
-      contents: [
+      model: 'llama-3.1-8b-instant',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are a speech transcription refinement assistant.\n' +
+            'The user spoke a decision proposal in English, Hindi, Telugu, or another language, which was transcribed using an automated tool. The transcription may contain phonetic errors, spelling mistakes, or missing punctuation.\n' +
+            'Your task is to:\n' +
+            '1. Correct all spelling, grammar, phonetic mistakes, and punctuation.\n' +
+            '2. If the input transcript is in Hindi, Telugu, or any other language, translate it into clean, natural English.\n' +
+            '3. Deduce what decision proposal the user was trying to say based on context.\n' +
+            '4. Keep the user\'s original intent intact.\n' +
+            '5. Output ONLY the refined, clean English transcript. Do not add any conversational text, explanations, or metadata.',
+        },
         {
           role: 'user',
-          parts: [{ text: `Refine this raw transcription of a decision proposal:\n"${trimmed}"` }],
+          content: `Refine this raw transcription of a decision proposal:\n"${trimmed}"`,
         },
       ],
-      generationConfig: {
-        temperature: 0.3,
-        topK: 40,
-        topP: 0.95,
-        maxOutputTokens: 1024,
-      },
+      temperature: 0.3,
+      max_tokens: 1024,
     };
 
-    const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
+    const response = await fetch(GROQ_API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
       body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
       const errorBody = await response.text();
-      return res.status(response.status).json({ error: `Gemini API error: ${errorBody}` });
+      return res.status(response.status).json({ error: `Refinement error: ${errorBody}` });
     }
 
     const data = await response.json();
-    const refined = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const refined = data?.choices?.[0]?.message?.content;
 
     res.json({ refinedText: refined ? refined.trim() : trimmed });
   } catch (err) {
-    console.error('[Proxy Gemini refine] Error:', err);
+    console.error('[Proxy refine] Error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -241,7 +234,53 @@ async function translateText(text, targetLang, apiKey) {
   return data?.translated_text;
 }
 
-async function generateSarvamTTS(text, lang, apiKey) {
+
+/**
+ * Splits text into chunks of at most maxLen characters, breaking at word boundaries.
+ */
+function splitIntoChunks(text, maxLen = 490) {
+  const words = text.split(' ');
+  const chunks = [];
+  let current = '';
+
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length > maxLen) {
+      if (current) chunks.push(current);
+      // If a single word exceeds maxLen, hard-slice it
+      current = word.length > maxLen ? word.substring(0, maxLen) : word;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+/**
+ * Concatenates multiple base64-encoded WAV audio strings into one.
+ * Each WAV has a 44-byte header; we keep the first header and append
+ * only the raw PCM data from subsequent chunks, then fix the size fields.
+ */
+function concatWavBase64(base64Array) {
+  if (base64Array.length === 0) return '';
+  if (base64Array.length === 1) return base64Array[0];
+
+  const WAV_HEADER_SIZE = 44;
+  const buffers = base64Array.map((b) => Buffer.from(b, 'base64'));
+  const pcmChunks = buffers.map((buf) => buf.slice(WAV_HEADER_SIZE));
+  const totalPcmSize = pcmChunks.reduce((sum, c) => sum + c.length, 0);
+
+  const output = Buffer.concat([buffers[0].slice(0, WAV_HEADER_SIZE), ...pcmChunks]);
+  // Fix RIFF chunk size (bytes 4-7)
+  output.writeUInt32LE(output.length - 8, 4);
+  // Fix data sub-chunk size (bytes 40-43)
+  output.writeUInt32LE(totalPcmSize, 40);
+
+  return output.toString('base64');
+}
+
+async function generateSarvamTTS(chunks, lang, apiKey) {
   const response = await fetch(`${SARVAM_API_BASE}/text-to-speech`, {
     method: 'POST',
     headers: {
@@ -249,7 +288,7 @@ async function generateSarvamTTS(text, lang, apiKey) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      inputs: [text],
+      inputs: chunks,
       target_language_code: lang,
       speaker: lang === 'hi-IN' ? 'anushka' : 'arya',
       pitch: 0,
@@ -267,7 +306,9 @@ async function generateSarvamTTS(text, lang, apiKey) {
   }
 
   const data = await response.json();
-  return data?.audios?.[0];
+  const audios = data?.audios;
+  if (!audios || audios.length === 0) return null;
+  return concatWavBase64(audios);
 }
 
 router.post('/sarvam/translate-and-speak', async (req, res) => {
@@ -287,7 +328,10 @@ router.post('/sarvam/translate-and-speak', async (req, res) => {
       return res.status(500).json({ error: 'Translation returned empty result.' });
     }
 
-    const base64Audio = await generateSarvamTTS(translatedText, targetLang, apiKey);
+    // Sarvam TTS allows max 500 chars per input item — chunk accordingly
+    const chunks = splitIntoChunks(translatedText, 490);
+
+    const base64Audio = await generateSarvamTTS(chunks, targetLang, apiKey);
     if (!base64Audio) {
       return res.status(500).json({ error: 'TTS returned empty audio.' });
     }
@@ -298,6 +342,7 @@ router.post('/sarvam/translate-and-speak', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 router.post('/sarvam/speech-to-text', upload.single('file'), async (req, res) => {
   if (!req.file) {
@@ -373,7 +418,7 @@ router.post('/elevenlabs/generate-voice', async (req, res) => {
   try {
     const opts = options || {};
     const requestBody = {
-      text: text.substring(0, 1000),
+      text: text.substring(0, 2500),
       model_id: 'eleven_multilingual_v2',
       voice_settings: {
         stability: opts.stability ?? 0.5,

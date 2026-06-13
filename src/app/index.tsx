@@ -25,7 +25,20 @@ import { BorderRadius, BottomTabInset, Fonts, MaxContentWidth, Spacing } from '@
 import { AnalysisLoader } from '@/components/AnalysisLoader';
 import { analyzeDecision, refineTranscript } from '@/services/gemini';
 import { saveSimulation } from '@/services/mongodb';
-import { speechToText } from '@/services/sarvam';
+import { speechToText, translateAndSpeak } from '@/services/sarvam';
+import { generateVoice } from '@/services/elevenlabs';
+
+const detectLanguageFromText = (text: string): 'en-IN' | 'hi-IN' | 'te-IN' => {
+  // Check Devanagari range (Hindi)
+  if (/[\u0900-\u097F]/.test(text)) {
+    return 'hi-IN';
+  }
+  // Check Telugu range (Telugu)
+  if (/[\u0C00-\u0C7F]/.test(text)) {
+    return 'te-IN';
+  }
+  return 'en-IN';
+};
 
 export default function HomeScreen() {
   const theme = useTheme();
@@ -37,6 +50,91 @@ export default function HomeScreen() {
   const [currentSimulation, setCurrentSimulation] = useState<SimulationRecord | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedStakeholder, setSelectedStakeholder] = useState<Stakeholder | null>(null);
+  const [summaryAudioState, setSummaryAudioState] = useState<'idle' | 'loading' | 'playing' | 'paused' | 'error'>('idle');
+
+  // Summary inline audio refs (web: HTMLAudioElement)
+  const summaryAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  const destroySummaryAudio = () => {
+    if (summaryAudioRef.current) {
+      summaryAudioRef.current.pause();
+      summaryAudioRef.current.src = '';
+      summaryAudioRef.current = null;
+    }
+  };
+
+  const handleSummaryPlayPause = async () => {
+    if (summaryAudioState === 'loading') return;
+    const text = currentSimulation?.conflictSummary || currentSimulation?.summary || '';
+    if (!text) return;
+
+    // Pause if playing
+    if (summaryAudioState === 'playing' && summaryAudioRef.current) {
+      summaryAudioRef.current.pause();
+      setSummaryAudioState('paused');
+      return;
+    }
+
+    // Resume if paused
+    if (summaryAudioState === 'paused' && summaryAudioRef.current) {
+      await summaryAudioRef.current.play();
+      setSummaryAudioState('playing');
+      return;
+    }
+
+    // Fresh load & play
+    setSummaryAudioState('loading');
+    destroySummaryAudio();
+
+    try {
+      const lang = spokenLanguage === 'hi-IN' ? 'hi-IN' : (spokenLanguage === 'te-IN' ? 'te-IN' : 'English');
+      let base64: string;
+      let mimeType: string;
+
+      if (lang === 'English') {
+        base64 = await generateVoice(text, 'default');
+        mimeType = 'audio/mpeg';
+      } else {
+        base64 = await translateAndSpeak(text, lang);
+        mimeType = 'audio/wav';
+      }
+
+      const dataUri = `data:${mimeType};base64,${base64}`;
+      // Cast to HTMLAudioElement constructor explicitly — `typeof Audio` would resolve
+      // to expo-av's Audio (which has no construct signature), causing a TS error.
+      const AudioCtor = (typeof window !== 'undefined' ? window.Audio : null) as
+        | (new (src?: string) => HTMLAudioElement)
+        | null;
+      if (!AudioCtor) throw new Error('Audio not available on this platform');
+      const audio = new AudioCtor(dataUri);
+      summaryAudioRef.current = audio;
+
+      audio.addEventListener('ended', () => {
+        setSummaryAudioState('idle');
+      });
+
+      await audio.play();
+      setSummaryAudioState('playing');
+    } catch (err: any) {
+      console.error('Summary audio error:', err);
+      setSummaryAudioState('error');
+    }
+  };
+
+  // Cleanup summary audio on unmount
+  useEffect(() => {
+    return () => { destroySummaryAudio(); };
+  }, []);
+
+  // Autoplay summary audio when a new simulation result arrives
+  useEffect(() => {
+    if (currentSimulation) {
+      // Small delay so the results section has rendered
+      const t = setTimeout(() => { handleSummaryPlayPause(); }, 600);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSimulation?.id]);
 
   // Recording & Transcription State
   const [isRecording, setIsRecording] = useState(false);
@@ -89,6 +187,13 @@ export default function HomeScreen() {
           try {
             const rawText = await speechToText(audioBlob, spokenLanguage);
             setRawTranscriptText(rawText);
+            
+            // Auto detect language from raw text if user selected Auto Detect
+            if (spokenLanguage === 'unknown') {
+              const detected = detectLanguageFromText(rawText);
+              setSpokenLanguage(detected);
+            }
+
             const refinedText = await refineTranscript(rawText);
             setProposalText(refinedText);
           } catch (err: any) {
@@ -155,6 +260,13 @@ export default function HomeScreen() {
             try {
               const rawText = await speechToText(uri, spokenLanguage);
               setRawTranscriptText(rawText);
+              
+              // Auto detect language from raw text if user selected Auto Detect
+              if (spokenLanguage === 'unknown') {
+                const detected = detectLanguageFromText(rawText);
+                setSpokenLanguage(detected);
+              }
+
               const refinedText = await refineTranscript(rawText);
               setProposalText(refinedText);
             } catch (err: any) {
@@ -207,25 +319,8 @@ export default function HomeScreen() {
     setIsLoading(true);
 
     try {
-      const hasApiKey = !!process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-
-      let simulation: SimulationRecord;
-
-      if (hasApiKey) {
-        // Real Gemini analysis
-        simulation = await analyzeDecision(text);
-      } else {
-        // Demo mode — keyword-match to mock data
-        await new Promise((resolve) => setTimeout(resolve, 8000));
-        const lowerText = text.toLowerCase();
-        if (lowerText.includes('cash') || lowerText.includes('card') || lowerText.includes('digital')) {
-          simulation = MOCK_SIMULATIONS[1];
-        } else if (lowerText.includes('office') || lowerText.includes('remote') || lowerText.includes('hybrid')) {
-          simulation = MOCK_SIMULATIONS[2];
-        } else {
-          simulation = MOCK_SIMULATIONS[0];
-        }
-      }
+      // Always call the real server — API key is managed server-side (Groq)
+      const simulation = await analyzeDecision(text);
 
       setCurrentSimulation(simulation);
 
@@ -248,10 +343,12 @@ export default function HomeScreen() {
   };
 
   const handleReset = () => {
+    destroySummaryAudio();
     setCurrentSimulation(null);
     setProposalText('');
     setRawTranscriptText('');
     setErrorMessage(null);
+    setSummaryAudioState('idle');
   };
 
   const handleRetry = () => {
@@ -332,36 +429,39 @@ export default function HomeScreen() {
                 })}
               </View>
 
-              {/* Recording interface */}
-              <View style={[styles.recordingArea, { borderColor: theme.outline }]}>
+              {/* Recording interface — big centered mic */}
+              <View style={styles.micArea}>
                 {isTranscribing ? (
                   <View style={styles.loaderContainer}>
-                    <ActivityIndicator color={theme.primary} />
+                    <ActivityIndicator color={theme.primary} size="large" />
                     <ThemedText type="code" themeColor="textSecondary" style={styles.statusLabel}>
                       TRANSCRIBING VOICE VIA SARVAM AI...
                     </ThemedText>
                   </View>
                 ) : isRecording ? (
-                  <Pressable onPress={stopRecording} style={styles.micButtonActive}>
+                  <Pressable onPress={stopRecording} style={styles.micCircleActive}>
                     <SymbolView
                       name={{ ios: 'stop.fill', android: 'stop', web: 'stop' }}
                       tintColor={theme.error}
-                      size={32}
+                      size={36}
                     />
-                    <ThemedText type="code" style={[styles.durationText, { color: theme.error }]}>
-                      RECORDING: {recordingDuration}s
+                    <ThemedText type="code" style={[styles.micCircleLabel, { color: theme.error }]}>
+                      {recordingDuration}s
                     </ThemedText>
                   </Pressable>
                 ) : (
-                  <Pressable onPress={startRecording} style={({ pressed }) => [styles.micButton, pressed && { opacity: 0.8 }]}>
+                  <Pressable
+                    onPress={startRecording}
+                    style={({ pressed }) => [
+                      styles.micCircle,
+                      { backgroundColor: theme.primaryContainer, borderColor: theme.primary },
+                      pressed && { transform: [{ scale: 0.93 }] },
+                    ]}>
                     <SymbolView
                       name={{ ios: 'mic.fill', android: 'mic', web: 'mic' }}
                       tintColor={theme.primary}
-                      size={36}
+                      size={48}
                     />
-                    <ThemedText type="code" themeColor="textSecondary" style={styles.micLabel}>
-                      TAP TO RECORD DECISION
-                    </ThemedText>
                   </Pressable>
                 )}
               </View>
@@ -459,18 +559,51 @@ export default function HomeScreen() {
             <View style={styles.resultsContainer}>
               {/* Proposal Banner */}
               <View style={[styles.proposalBanner, { borderLeftColor: theme.primary }]}>
-                <ThemedText type="code" themeColor="primary" style={styles.bannerLabel}>
-                  PROPOSAL UNDER ANALYSIS
-                </ThemedText>
+                <View style={styles.bannerHeaderRow}>
+                  <ThemedText type="code" themeColor="primary" style={styles.bannerLabel}>
+                    PROPOSAL UNDER ANALYSIS
+                  </ThemedText>
+
+                </View>
                 <ThemedText type="smallBold" style={styles.bannerTitle}>
                   {currentSimulation.decisionTitle}
                 </ThemedText>
-                {currentSimulation.summary && (
-                  <ThemedText type="small" themeColor="textSecondary" style={styles.summaryText}>
-                    {currentSimulation.summary}
-                  </ThemedText>
-                )}
               </View>
+
+              {/* Minimal Summary Audio Bar — single source of summary + one pause button */}
+              {(currentSimulation.conflictSummary || currentSimulation.summary) && (
+                <View style={[styles.summaryBar, { borderColor: theme.outline, backgroundColor: theme.backgroundElement }]}>
+                  <View style={styles.summaryBarInner}>
+                    <ThemedText type="small" themeColor="textSecondary" style={styles.summaryBarText}>
+                      {currentSimulation.conflictSummary || currentSimulation.summary}
+                    </ThemedText>
+                    <Pressable
+                      id="summary-play-btn"
+                      onPress={handleSummaryPlayPause}
+                      disabled={summaryAudioState === 'loading'}
+                      style={({ pressed }) => [
+                        styles.summaryBarPlayBtn,
+                        { backgroundColor: summaryAudioState === 'error' ? theme.error : theme.primary },
+                        pressed && { opacity: 0.85 },
+                        summaryAudioState === 'loading' && { opacity: 0.6 },
+                      ]}>
+                      {summaryAudioState === 'loading' ? (
+                        <ActivityIndicator size="small" color={theme.surface} />
+                      ) : (
+                        <SymbolView
+                          name={{
+                            ios: summaryAudioState === 'playing' ? 'pause.fill' : 'play.fill',
+                            android: summaryAudioState === 'playing' ? 'pause' : 'play_arrow',
+                            web: summaryAudioState === 'playing' ? 'pause' : 'play_arrow',
+                          }}
+                          tintColor={theme.surface}
+                          size={14}
+                        />
+                      )}
+                    </Pressable>
+                  </View>
+                </View>
+              )}
 
               {/* Stakeholder Directory */}
               <View style={styles.directoryHeader}>
@@ -650,9 +783,11 @@ export default function HomeScreen() {
             {/* Voice player */}
             <View style={styles.voiceSection}>
               <VoicePlayer
+                key={`stakeholder-${selectedStakeholder.id}-${spokenLanguage}`}
                 speakerName={selectedStakeholder.name}
                 voiceQuote={selectedStakeholder.voiceQuote}
                 voiceArchetype={selectedStakeholder.voiceArchetype ?? 'default'}
+                defaultLanguage={spokenLanguage === 'hi-IN' ? 'hi-IN' : (spokenLanguage === 'te-IN' ? 'te-IN' : 'English')}
               />
             </View>
 
@@ -820,12 +955,58 @@ const styles = StyleSheet.create({
     borderLeftWidth: 3,
     paddingLeft: Spacing.three,
     paddingVertical: Spacing.two,
-    marginBottom: Spacing.four,
+    marginBottom: Spacing.two,
     gap: Spacing.one,
   },
+  bannerHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+    marginBottom: Spacing.one,
+  },
   bannerLabel: { fontSize: 10, fontWeight: '700' },
+  audioPlayingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.sm,
+  },
+  audioPlayingText: {
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
   bannerTitle: { fontSize: 16, lineHeight: 22, fontWeight: '600' },
   summaryText: { fontSize: 13, lineHeight: 18, marginTop: Spacing.one },
+  summaryBar: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.three,
+    marginBottom: Spacing.four,
+  },
+  summaryBarInner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.three,
+  },
+  summaryBarText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  summaryBarPlayBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+    marginTop: 1,
+  },
   directoryHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -909,15 +1090,32 @@ const styles = StyleSheet.create({
   quoteText: { flex: 1, fontSize: 14, lineHeight: 20 },
   voiceSection: { marginBottom: Spacing.three },
   sarvamNote: { fontSize: 10, lineHeight: 14, textAlign: 'center' },
-  recordingArea: {
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.four,
+  micArea: {
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 160,
+    paddingVertical: Spacing.five,
     marginTop: Spacing.two,
+  },
+  micCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  micCircleActive: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  micCircleLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   loaderContainer: {
     alignItems: 'center',
@@ -926,28 +1124,6 @@ const styles = StyleSheet.create({
   statusLabel: {
     fontSize: 11,
     letterSpacing: 0.5,
-    marginTop: Spacing.two,
-  },
-  micButton: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.two,
-    width: '100%',
-  },
-  micButtonActive: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.two,
-    width: '100%',
-  },
-  micLabel: {
-    fontSize: 11,
-    letterSpacing: 0.5,
-    marginTop: Spacing.two,
-  },
-  durationText: {
-    fontSize: 12,
-    fontWeight: '700',
     marginTop: Spacing.two,
   },
   transcriptionBox: {
