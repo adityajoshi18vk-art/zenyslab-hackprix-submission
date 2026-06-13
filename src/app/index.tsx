@@ -21,6 +21,7 @@ import { ConflictMap } from '@/components/ConflictMap';
 import { DebateArena } from '@/components/DebateArena';
 import { AccountabilityLedger } from '@/components/AccountabilityLedger';
 import { EquityIndex } from '@/components/EquityIndex';
+import { ReportCard } from '@/components/ReportCard';
 import { MOCK_SIMULATIONS, SimulationRecord, Stakeholder, ConflictPair } from '@/constants/mockData';
 import { useTheme } from '@/hooks/use-theme';
 import { BorderRadius, BottomTabInset, Fonts, MaxContentWidth, Spacing } from '@/constants/theme';
@@ -29,6 +30,7 @@ import { analyzeDecision, refineTranscript } from '@/services/gemini';
 import { saveSimulation } from '@/services/mongodb';
 import { speechToText, translateAndSpeak } from '@/services/sarvam';
 import { generateVoice } from '@/services/elevenlabs';
+import { exportReportCard } from '@/services/exportReport';
 
 const detectLanguageFromText = (text: string): 'en-IN' | 'hi-IN' | 'te-IN' => {
   // Check Devanagari range (Hindi)
@@ -729,21 +731,36 @@ export default function HomeScreen() {
                 blindSpots={overlookedStakeholders.map((s) => s.name)}
               />
 
-              {/* Reset button at the bottom */}
-              <Pressable
-                onPress={handleReset}
-                style={({ pressed }) => [
-                  styles.resetButtonBottom,
-                  { borderColor: theme.outline },
-                  pressed && { backgroundColor: theme.backgroundElement },
-                ]}>
-                <SymbolView
-                  name={{ ios: 'arrow.counterclockwise', android: 'refresh', web: 'refresh' }}
-                  tintColor={theme.text}
-                  size={14}
-                />
-                <ThemedText type="code" style={{ fontWeight: '700' }}>New Analysis</ThemedText>
-              </Pressable>
+              {/* Action Buttons */}
+              <View style={{ flexDirection: 'row', gap: Spacing.three, marginTop: Spacing.four }}>
+                <Pressable
+                  onPress={() => exportReportCard('report-card-export', 'analysis')}
+                  style={({ pressed }) => [
+                    styles.resetButtonBottom,
+                    { flex: 1, borderColor: theme.outline, backgroundColor: theme.primaryContainer },
+                    pressed && { opacity: 0.8 },
+                  ]}>
+                  <ThemedText style={{ fontSize: 16 }}>📊</ThemedText>
+                  <ThemedText type="code" style={{ fontWeight: '700', color: theme.primary }}>Export Report Card</ThemedText>
+                </Pressable>
+
+                {/* Reset button */}
+                <Pressable
+                  onPress={handleReset}
+                  style={({ pressed }) => [
+                    styles.resetButtonBottom,
+                    { flex: 1, borderColor: theme.outline },
+                    pressed && { backgroundColor: theme.backgroundElement },
+                  ]}>
+                  <SymbolView
+                    name={{ ios: 'arrow.counterclockwise', android: 'refresh', web: 'refresh' }}
+                    tintColor={theme.text}
+                    size={14}
+                  />
+                  <ThemedText type="code" style={{ fontWeight: '700' }}>New Analysis</ThemedText>
+                </Pressable>
+              </View>
+              <ReportCard simulation={displayedSimulation} />
             </View>
           )}
         </ScrollView>
