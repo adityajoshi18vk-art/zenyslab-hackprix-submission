@@ -111,7 +111,7 @@ async function translateSimulation(simulation, langName, apiKey) {
         },
       ],
       temperature: 0.2,
-      max_tokens: 8192,
+      max_tokens: 4000,
       response_format: { type: 'json_object' },
     }),
   });
@@ -150,6 +150,13 @@ async function translateSimulation(simulation, langName, apiKey) {
       groupB: t.conflicts?.[i]?.groupB || c.groupB,
       reason: t.conflicts?.[i]?.reason || c.reason,
     })),
+    blindSpots: (simulation.blindSpots || []).map(bs => {
+      const idx = simulation.stakeholders.findIndex(s => s.name === bs);
+      if (idx !== -1 && t.stakeholders?.[idx]?.name) {
+        return t.stakeholders[idx].name;
+      }
+      return bs;
+    }),
   };
 }
 
@@ -251,6 +258,36 @@ router.post('/gemini/analyze', async (req, res) => {
   }
 });
 
+router.post('/gemini/translate', async (req, res) => {
+  const { simulation, targetLanguage } = req.body;
+  if (!simulation || !targetLanguage) {
+    return res.status(400).json({ error: 'Missing simulation or targetLanguage.' });
+  }
+
+  const langMap = { 'hi-IN': 'Hindi', 'te-IN': 'Telugu', 'en-IN': 'English' };
+  const langName = langMap[targetLanguage];
+
+  if (!langName) {
+    return res.status(400).json({ error: 'Invalid target language.' });
+  }
+
+  if (langName === 'English') {
+    return res.json(simulation);
+  }
+
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'Missing API key on server.' });
+  }
+
+  try {
+    const translated = await translateSimulation(simulation, langName, apiKey);
+    res.json(translated);
+  } catch (err) {
+    console.error('[Proxy translate] Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 router.post('/gemini/refine', async (req, res) => {
   const { rawText } = req.body;

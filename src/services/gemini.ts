@@ -40,6 +40,28 @@ export async function analyzeDecision(decisionText: string, targetLanguage?: str
 }
 
 /**
+ * Translates an entire SimulationRecord to the target language via the secure server proxy.
+ */
+export async function translateSimulationRecord(simulation: SimulationRecord, targetLanguage: string): Promise<SimulationRecord> {
+  const response = await fetch(`${getApiUrl()}/api/proxy/gemini/translate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ simulation, targetLanguage }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Translation error (${response.status}): ${errorBody}`);
+  }
+
+  const data = await response.json();
+  if (data.error) {
+    throw new Error(data.error);
+  }
+  return data;
+}
+
+/**
  * Refines a raw speech-to-text transcript using Gemini 2.0 Flash via the secure server proxy.
  */
 export async function refineTranscript(rawText: string): Promise<string> {

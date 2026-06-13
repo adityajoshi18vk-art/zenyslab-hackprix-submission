@@ -26,7 +26,7 @@ import { MOCK_SIMULATIONS, SimulationRecord, Stakeholder, ConflictPair } from '@
 import { useTheme } from '@/hooks/use-theme';
 import { BorderRadius, BottomTabInset, Fonts, MaxContentWidth, Spacing } from '@/constants/theme';
 import { AnalysisLoader } from '@/components/AnalysisLoader';
-import { analyzeDecision, refineTranscript } from '@/services/gemini';
+import { analyzeDecision, refineTranscript, translateSimulationRecord } from '@/services/gemini';
 import { saveSimulation } from '@/services/mongodb';
 import { speechToText, translateAndSpeak } from '@/services/sarvam';
 import { generateVoice } from '@/services/elevenlabs';
@@ -56,7 +56,12 @@ export default function HomeScreen() {
   const spokenLanguageRef = useRef<'unknown' | 'en-IN' | 'hi-IN' | 'te-IN'>('unknown');
   const [currentSimulation, setCurrentSimulation] = useState<SimulationRecord | null>(null);
   const [englishSimulation, setEnglishSimulation] = useState<SimulationRecord | null>(null);
-  const [showEnglish, setShowEnglish] = useState(false);
+  
+  // Translation state
+  const [displayLanguage, setDisplayLanguage] = useState<'en-IN' | 'hi-IN' | 'te-IN'>('en-IN');
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [translationsCache, setTranslationsCache] = useState<Record<string, SimulationRecord>>({});
+
   const [isLoading, setIsLoading] = useState(false);
   const [selectedStakeholder, setSelectedStakeholder] = useState<Stakeholder | null>(null);
   const [summaryAudioState, setSummaryAudioState] = useState<'idle' | 'loading' | 'playing' | 'paused' | 'error'>('idle');
@@ -335,13 +340,11 @@ export default function HomeScreen() {
     setErrorMessage(null);
     setCurrentSimulation(null);
     setEnglishSimulation(null);
-    setShowEnglish(false);
+    setTranslationsCache({});
+    setDisplayLanguage('en-IN');
     setIsLoading(true);
 
     try {
-      // Read from the ref — not the state — to get the language that was
-      // detected/selected during the recording phase. The state may not have
-      // been flushed yet when this function executes.
       const effectiveLang = spokenLanguageRef.current;
       const targetLang = (effectiveLang === 'hi-IN' || effectiveLang === 'te-IN')
         ? effectiveLang
@@ -349,11 +352,19 @@ export default function HomeScreen() {
 
       const simulation = await analyzeDecision(text, targetLang);
 
-      // If a translation was done, store the English original separately
-      if (simulation._englishVersion) {
-        setEnglishSimulation(simulation._englishVersion as SimulationRecord);
-      }
+      const engSim = (simulation._englishVersion as SimulationRecord) || simulation;
+      setEnglishSimulation(engSim);
       setCurrentSimulation(simulation);
+      
+      // Initialize cache with what we have
+      const initialCache: Record<string, SimulationRecord> = {
+        'en-IN': engSim,
+      };
+      if (targetLang) {
+        initialCache[targetLang] = simulation;
+        setDisplayLanguage(targetLang);
+      }
+      setTranslationsCache(initialCache);
 
       // Persist to MongoDB (fire-and-forget, non-blocking)
       saveSimulation(simulation).catch((err) => {
@@ -368,6 +379,37 @@ export default function HomeScreen() {
     }
   };
 
+  const handleLanguageSwitch = async (langCode: 'en-IN' | 'hi-IN' | 'te-IN') => {
+    if (langCode === displayLanguage) return;
+    
+    // Switch to English is always instant (it's the base)
+    if (langCode === 'en-IN') {
+      setDisplayLanguage('en-IN');
+      return;
+    }
+
+    // If we already translated to this language, just switch
+    if (translationsCache[langCode]) {
+      setDisplayLanguage(langCode);
+      return;
+    }
+
+    // Otherwise, translate on the fly
+    if (!englishSimulation) return;
+    
+    setIsTranslating(true);
+    try {
+      const translated = await translateSimulationRecord(englishSimulation, langCode);
+      setTranslationsCache(prev => ({ ...prev, [langCode]: translated }));
+      setDisplayLanguage(langCode);
+    } catch (err) {
+      console.error('Failed to translate:', err);
+      // Fallback: stay on current language or show error toast if we had one
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
   const handleAnalyze = () => {
     if (proposalText.trim().length === 0) return;
     runAnalysis(proposalText.trim());
@@ -377,7 +419,8 @@ export default function HomeScreen() {
     destroySummaryAudio();
     setCurrentSimulation(null);
     setEnglishSimulation(null);
-    setShowEnglish(false);
+    setTranslationsCache({});
+    setDisplayLanguage('en-IN');
     setProposalText('');
     setRawTranscriptText('');
     setErrorMessage(null);
@@ -402,8 +445,7 @@ export default function HomeScreen() {
   // ---------------------------------------------------------------------------
   // Derived state
   // ---------------------------------------------------------------------------
-  // When a translation is available, toggle between translated and English views
-  const displayedSimulation = (showEnglish && englishSimulation) ? englishSimulation : currentSimulation;
+  const displayedSimulation = translationsCache[displayLanguage] || englishSimulation || currentSimulation;
 
   const overlookedStakeholders = displayedSimulation
     ? displayedSimulation.stakeholders
@@ -613,31 +655,40 @@ export default function HomeScreen() {
                 blindSpots={displayedSimulation?.blindSpots || []}
               />
               
-              {/* Language toggle — only shown when a translation is available */}
-              {englishSimulation && (
-                <Pressable
-                  onPress={() => setShowEnglish((v) => !v)}
-                  style={({ pressed }) => [
-                    styles.langToggleBtn,
-                    { backgroundColor: theme.backgroundElement, borderColor: theme.outline },
-                    pressed && { opacity: 0.75 },
-                  ]}>
-                  <SymbolView
-                    name={{
-                      ios: showEnglish ? 'globe' : 'character.bubble',
-                      android: showEnglish ? 'language' : 'translate',
-                      web: showEnglish ? 'language' : 'translate',
-                    }}
-                    tintColor={theme.textSecondary}
-                    size={12}
-                  />
-                  <ThemedText type="code" themeColor="textSecondary" style={{ fontSize: 11 }}>
-                    {showEnglish
-                      ? (spokenLanguage === 'hi-IN' ? 'हिंदी में देखें' : 'తెలుగులో చూడండి')
-                      : 'View in English'}
-                  </ThemedText>
-                </Pressable>
-              )}
+              {/* Language Selector */}
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: Spacing.three, gap: Spacing.two, alignItems: 'center' }}>
+                {isTranslating && <ActivityIndicator size="small" color={theme.primary} style={{ marginRight: Spacing.two }} />}
+                {[
+                  { code: 'en-IN', label: '🌐 English' },
+                  { code: 'hi-IN', label: 'हिंदी' },
+                  { code: 'te-IN', label: 'తెలుగు' },
+                ].map((lang) => {
+                  const isActive = displayLanguage === lang.code;
+                  return (
+                    <Pressable
+                      key={lang.code}
+                      onPress={() => handleLanguageSwitch(lang.code as 'en-IN' | 'hi-IN' | 'te-IN')}
+                      disabled={isTranslating}
+                      style={({ pressed }) => [
+                        styles.langPill,
+                        { borderColor: theme.outline, paddingHorizontal: 12, paddingVertical: 6 },
+                        isActive && { backgroundColor: theme.primaryContainer, borderColor: theme.primary },
+                        pressed && !isActive && { backgroundColor: theme.backgroundElement },
+                        isTranslating && { opacity: 0.5 },
+                      ]}>
+                      <ThemedText
+                        type="code"
+                        style={[
+                          styles.langPillText,
+                          { fontSize: 12 },
+                          isActive ? { color: theme.primary, fontWeight: '700' } : { color: theme.textSecondary }
+                        ]}>
+                        {lang.label}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
 
               {/* Proposal Banner */}
               <View style={[styles.proposalBanner, { borderLeftColor: theme.primary }]}>
