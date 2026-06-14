@@ -71,6 +71,37 @@ Ensure blindSpots lists only the names of stakeholders where isOverlooked is tru
 // ─── 1. GEMINI PROXIES ───────────────────────────────────────────────────────
 
 /**
+ * Helper to fetch a URL with retry logic on 429 (Rate Limit) and 5xx (Server Error) responses.
+ */
+async function fetchWithRetry(url, options, maxRetries = 3, initialDelay = 1000) {
+  let delay = initialDelay;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const response = await fetch(url, options);
+      if (response.status === 429 || (response.status >= 500 && response.status <= 599)) {
+        if (i < maxRetries - 1) {
+          const attempt = i + 1;
+          console.warn(`[Proxy fetch] HTTP ${response.status} from ${url}. Retrying in ${delay}ms... (Attempt ${attempt}/${maxRetries})`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          delay *= 2;
+          continue;
+        }
+      }
+      return response;
+    } catch (err) {
+      if (i < maxRetries - 1) {
+        const attempt = i + 1;
+        console.warn(`[Proxy fetch] Network error: ${err.message}. Retrying in ${delay}ms... (Attempt ${attempt}/${maxRetries})`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        delay *= 2;
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+/**
  * Batch-translates all visible text fields in a simulation result using Groq.
  * Falls back to the original English values on any error.
  */
@@ -94,7 +125,7 @@ async function translateSimulation(simulation, langName, apiKey) {
     })),
   };
 
-  const response = await fetch(GROQ_API_URL, {
+  const response = await fetchWithRetry(GROQ_API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -189,7 +220,7 @@ router.post('/gemini/analyze', async (req, res) => {
       response_format: { type: 'json_object' },
     };
 
-    const response = await fetch(GROQ_API_URL, {
+    const response = await fetchWithRetry(GROQ_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -338,7 +369,7 @@ router.post('/gemini/shadow-policy', async (req, res) => {
   ].join('\n');
 
   try {
-    const response = await fetch(GROQ_API_URL, {
+    const response = await fetchWithRetry(GROQ_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -486,7 +517,7 @@ router.post('/gemini/refine', async (req, res) => {
       max_tokens: 1024,
     };
 
-    const response = await fetch(GROQ_API_URL, {
+    const response = await fetchWithRetry(GROQ_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -517,7 +548,7 @@ router.post('/gemini/refine', async (req, res) => {
 // ─── 2. SARVAM PROXIES ───────────────────────────────────────────────────────
 
 async function translateText(text, targetLang, apiKey) {
-  const response = await fetch(`${SARVAM_API_BASE}/translate`, {
+  const response = await fetchWithRetry(`${SARVAM_API_BASE}/translate`, {
     method: 'POST',
     headers: {
       'API-Subscription-Key': apiKey,
@@ -589,7 +620,7 @@ function concatWavBase64(base64Array) {
 }
 
 async function generateSarvamTTS(chunks, lang, apiKey) {
-  const response = await fetch(`${SARVAM_API_BASE}/text-to-speech`, {
+  const response = await fetchWithRetry(`${SARVAM_API_BASE}/text-to-speech`, {
     method: 'POST',
     headers: {
       'API-Subscription-Key': apiKey,
@@ -672,7 +703,7 @@ router.post('/sarvam/speech-to-text', upload.single('file'), async (req, res) =>
     formData.append('model', 'saaras:v3');
     formData.append('language_code', languageCode);
 
-    const response = await fetch(`${SARVAM_API_BASE}/speech-to-text`, {
+    const response = await fetchWithRetry(`${SARVAM_API_BASE}/speech-to-text`, {
       method: 'POST',
       headers: {
         'API-Subscription-Key': apiKey,
@@ -736,7 +767,7 @@ router.post('/elevenlabs/generate-voice', async (req, res) => {
       },
     };
 
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `${ELEVENLABS_API_BASE}/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
       {
         method: 'POST',
@@ -826,7 +857,7 @@ Rules for your response:
 ${historyText ? `Debate so far:\n${historyText}\n\n` : ''}Now speak as ${speakerName} (2-3 sentences, spoken audio style, passionate and direct):`;
 
   try {
-    const response = await fetch(GROQ_API_URL, {
+    const response = await fetchWithRetry(GROQ_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

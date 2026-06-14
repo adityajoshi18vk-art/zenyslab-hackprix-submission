@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Platform,
   Pressable,
@@ -460,7 +461,10 @@ export default function HomeScreen() {
       setDisplayLanguage(langCode);
     } catch (err) {
       console.error('Failed to translate:', err);
-      // Fallback: stay on current language or show error toast if we had one
+      Alert.alert(
+        'Translation Failed',
+        'Could not translate the decision details at this moment. Please check your internet connection and try again.'
+      );
     } finally {
       setIsTranslating(false);
     }
