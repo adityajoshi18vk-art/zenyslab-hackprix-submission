@@ -61,11 +61,14 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Restrict CORS to localhost in dev
+// CORS Configuration
+// Allows localhost for dev, and accepts all origins in production (or configure FRONTEND_URL in .env)
+const allowedOrigins = process.env.FRONTEND_URL ? [process.env.FRONTEND_URL, 'http://localhost:8081', 'http://localhost:3000'] : '*';
+
 app.use(cors({
-  origin: ['http://localhost:8081', 'http://localhost:3000'],
+  origin: allowedOrigins,
   methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
 app.use(express.json({ limit: '1mb' }));
