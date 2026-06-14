@@ -121,5 +121,5 @@ Echo is built with a modern, highly scalable architecture splitting a fluid mobi
 ---
 
 <div align="center">
-  <p><b>Built with ❤️ for ZenysLab HackPrix</b></p>
+  <p><b>Built with ❤️ from ZenysLab for HackPrix</b></p>
 </div>
