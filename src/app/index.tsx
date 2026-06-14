@@ -24,7 +24,7 @@ import { EquityIndex } from '@/components/EquityIndex';
 import { ReportCard } from '@/components/ReportCard';
 import { ShadowPolicyModal } from '@/components/ShadowPolicyModal';
 import { cleanDecision } from '@/services/shadowPolicy';
-import { MOCK_SIMULATIONS, SimulationRecord, Stakeholder, ConflictPair } from '@/constants/mockData';
+import { SimulationRecord, Stakeholder, ConflictPair } from '@/constants/mockData';
 import { useTheme } from '@/hooks/use-theme';
 import { BorderRadius, BottomTabInset, Fonts, MaxContentWidth, Spacing } from '@/constants/theme';
 import { AnalysisLoader } from '@/components/AnalysisLoader';
@@ -1472,7 +1472,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: Spacing.two,
     paddingVertical: 14,
-    borderRadius: BorderRadius.medium,
+    borderRadius: BorderRadius.md,
     borderWidth: 1,
     marginTop: Spacing.three,
   },

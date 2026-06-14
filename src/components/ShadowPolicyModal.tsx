@@ -34,7 +34,7 @@ export function ShadowPolicyModal({
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const handleGenerate = async () => {
+  const handleGenerate = React.useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
@@ -45,7 +45,7 @@ export function ShadowPolicyModal({
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [decision, forgottenStakeholders, conflicts]);
 
   const handleCopy = async () => {
     if (!result?.improvedPolicy) return;
@@ -71,9 +71,12 @@ export function ShadowPolicyModal({
   // Auto-generate on first open
   React.useEffect(() => {
     if (visible && !result && !isLoading && !error) {
-      handleGenerate();
+      const timer = setTimeout(() => {
+        handleGenerate();
+      }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [visible]);
+  }, [visible, result, isLoading, error, handleGenerate]);
 
   if (!visible) return null;
 
@@ -153,7 +156,7 @@ export function ShadowPolicyModal({
                 </ThemedText>
                 <View style={[styles.policyBox, { backgroundColor: theme.backgroundElement, borderColor: theme.outline }]}>
                   <ThemedText type="small" style={{ lineHeight: 22, color: theme.textSecondary }}>
-                    "{decision}"
+                    &ldquo;{decision}&rdquo;
                   </ThemedText>
                 </View>
               </View>
@@ -246,7 +249,7 @@ const styles = StyleSheet.create({
     width: '92%',
     maxWidth: 600,
     maxHeight: '90%',
-    borderRadius: BorderRadius.large,
+    borderRadius: BorderRadius.lg,
     borderWidth: 1,
     overflow: 'hidden',
   },
@@ -280,14 +283,14 @@ const styles = StyleSheet.create({
   },
   errorBox: {
     padding: Spacing.four,
-    borderRadius: BorderRadius.medium,
+    borderRadius: BorderRadius.md,
     alignItems: 'center',
     gap: Spacing.three,
   },
   retryBtn: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: BorderRadius.small,
+    borderRadius: BorderRadius.sm,
     borderWidth: 1,
   },
   section: {
@@ -301,7 +304,7 @@ const styles = StyleSheet.create({
   },
   policyBox: {
     padding: Spacing.four,
-    borderRadius: BorderRadius.medium,
+    borderRadius: BorderRadius.md,
     borderWidth: 1,
   },
   arrowContainer: {
@@ -317,7 +320,7 @@ const styles = StyleSheet.create({
   },
   actionBtn: {
     paddingVertical: 14,
-    borderRadius: BorderRadius.medium,
+    borderRadius: BorderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
   },

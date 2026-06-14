@@ -1,7 +1,6 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { ThemedText } from './themed-text';
-import { ThemedView } from './themed-view';
 import { SimulationRecord } from '@/constants/mockData';
 import { calculateEquityScore, getEquityLabel } from './EquityIndex';
 
@@ -88,7 +87,7 @@ export function ReportCard({ simulation, language }: ReportCardProps) {
         {/* Policy Section */}
         <View style={styles.section}>
           <ThemedText style={styles.sectionLabel}>{t.policyAnalyzed}</ThemedText>
-          <ThemedText style={styles.policyTitle}>"{simulation.decisionTitle}"</ThemedText>
+          <ThemedText style={styles.policyTitle}>&ldquo;{simulation.decisionTitle}&rdquo;</ThemedText>
         </View>
 
         <View style={styles.divider} />

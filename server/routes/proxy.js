@@ -380,6 +380,72 @@ router.post('/gemini/shadow-policy', async (req, res) => {
   }
 });
 
+function cleanRefinedText(text) {
+  if (!text) return '';
+  let refined = text.trim();
+
+  // Strip common LLM preamble phrases and surrounding quotes iteratively
+  let cleaned = true;
+  let iterations = 0;
+  while (cleaned && iterations < 5) {
+    cleaned = false;
+    iterations++;
+
+    // Strip surrounding quotes
+    if (refined.startsWith('"') && refined.endsWith('"')) {
+      refined = refined.slice(1, -1).trim();
+      cleaned = true;
+    } else if (refined.startsWith("'") && refined.endsWith("'")) {
+      refined = refined.slice(1, -1).trim();
+      cleaned = true;
+    } else if (refined.startsWith('“') && refined.endsWith('”')) {
+      refined = refined.slice(1, -1).trim();
+      cleaned = true;
+    }
+
+    // Strip common prefixes
+    const prefixes = [
+      /^(the )?refined (transcript|version|text|proposal) is:?\s*/i,
+      /^here is the refined.*?:\s*/i,
+      /^refined:?\s*/i,
+      /^sure[,!.]?\s*/i,
+      /^(here'?s?|this is) (the )?(refined|cleaned|corrected).*?:\s*/i,
+      /^let's refine.*?:?\s*/i,
+      /^certainly:?\s*/i,
+      /^here you go:?\s*/i
+    ];
+
+    for (const pat of prefixes) {
+      const replaced = refined.replace(pat, '');
+      if (replaced !== refined) {
+        refined = replaced.trim();
+        cleaned = true;
+      }
+    }
+
+    // Multi-line preamble check: if the first line is conversational, discard it
+    const lines = refined.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length > 1) {
+      const firstLine = lines[0].toLowerCase();
+      if (
+        firstLine.includes('refine') ||
+        firstLine.includes('here is') ||
+        firstLine.includes('here\'s') ||
+        firstLine.includes('transcript') ||
+        firstLine.includes('proposal') ||
+        firstLine.includes('certainly') ||
+        firstLine.includes('sure') ||
+        firstLine.includes('corrected')
+      ) {
+        refined = lines.slice(1).join('\n').trim();
+        cleaned = true;
+      }
+    }
+  }
+
+  return refined;
+}
+
 router.post('/gemini/refine', async (req, res) => {
   const { rawText, languageCode } = req.body;
   const trimmed = rawText ? rawText.trim() : '';
@@ -409,8 +475,7 @@ router.post('/gemini/refine', async (req, res) => {
             `2. Output the refined transcript in the target language: ${targetLang}. Do NOT translate it to any other language.\n` +
             '3. Deduce what decision proposal the user was trying to say based on context.\n' +
             '4. Keep the user\'s original intent intact.\n' +
-            `5. Output ONLY the refined, clean transcript in ${targetLang}. Do not add any conversational text, explanations, or metadata.\n` +
-            `Never say 'I don't see a transcription' or describe the input — just output the refined text in ${targetLang}.`,
+            `5. CRITICAL: Output ONLY the final refined text. Do not wrap the output in quotes. Do not include any introductory remarks, preamble, conversational filler, or explanations (such as "Let's refine the decision proposal" or "Here is the refined text"). Start directly with the first word of the refined proposal.`,
         },
         {
           role: 'user',
@@ -439,18 +504,7 @@ router.post('/gemini/refine', async (req, res) => {
     let refined = data?.choices?.[0]?.message?.content;
 
     if (refined) {
-      // Strip common LLM preamble phrases that models sometimes prepend
-      refined = refined
-        .replace(/^(the )?refined (transcript|version|text|proposal) is:?\s*/i, '')
-        .replace(/^here is the refined.*?:\s*/i, '')
-        .replace(/^refined:?\s*/i, '')
-        .replace(/^sure[,!.]?\s*/i, '')
-        .replace(/^(here'?s?|this is) (the )?(refined|cleaned|corrected).*?:\s*/i, '')
-        .trim();
-      // Strip surrounding quotes if the entire text is wrapped in them
-      if (refined.startsWith('"') && refined.endsWith('"')) {
-        refined = refined.slice(1, -1).trim();
-      }
+      refined = cleanRefinedText(refined);
     }
 
     res.json({ refinedText: refined ? refined.trim() : trimmed });

@@ -151,7 +151,7 @@ export function EquityIndex({ stakeholders, conflicts, blindSpots, language }: E
       </View>
 
       <ThemedText style={[styles.label, { color: currentColor }]}>
-        "{getEquityLabel(displayScore, blindSpots?.length || 0, language)}"
+        &ldquo;{getEquityLabel(displayScore, blindSpots?.length || 0, language)}&rdquo;
       </ThemedText>
     </ThemedView>
   );

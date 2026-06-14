@@ -25,7 +25,7 @@ import { SymbolView } from 'expo-symbols';
 
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
-import { BorderRadius, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 import { ConflictPair, Stakeholder, VoiceArchetype } from '@/constants/mockData';
 import { generateVoice } from '@/services/elevenlabs';
 import { translateAndSpeak } from '@/services/sarvam';
@@ -94,7 +94,7 @@ function playBase64Audio(
   });
 }
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 
 // ---------------------------------------------------------------------------
 // Debate text via secure server proxy — 1 sentence, punchy
@@ -129,7 +129,7 @@ async function prefetchTurn(params: {
   speakerSide: 'groupA' | 'groupB';
   conflict: ConflictPair;
   decisionContext: string;
-  history: Array<{ speaker: string; text: string }>;
+  history: { speaker: string; text: string }[];
   stakeholders: Stakeholder[];
   language: 'en-IN' | 'hi-IN' | 'te-IN' | 'unknown';
 }): Promise<PrefetchedTurn> {
@@ -164,10 +164,22 @@ async function prefetchTurn(params: {
 }
 
 // ---------------------------------------------------------------------------
-const DEBATE_TRANSLATIONS = {
+interface DebateTranslation {
+  liveDebate: string;
+  turns: (count: number) => string;
+  conflictLabel: string;
+  emptyText: string;
+  loadingArgument: string;
+  startDebate: string;
+  restartDebate: string;
+  stopDebate: string;
+  noteText: string;
+}
+
+const DEBATE_TRANSLATIONS: Record<string, DebateTranslation> = {
   'en-IN': {
     liveDebate: 'LIVE DEBATE',
-    turns: (count: number) => `${count} TURNS`,
+    turns: (count) => `${count} TURNS`,
     conflictLabel: 'CONFLICT:',
     emptyText: "Tap Start Debate — they'll fight it out with real voices, no breaks.",
     loadingArgument: 'loading argument...',
@@ -178,7 +190,7 @@ const DEBATE_TRANSLATIONS = {
   },
   'hi-IN': {
     liveDebate: 'लाइव बहस',
-    turns: (count: number) => `${count} बारी`,
+    turns: (count) => `${count} बारी`,
     conflictLabel: 'संघर्ष:',
     emptyText: 'बहस शुरू करें पर टैप करें - वे बिना किसी रोक के वास्तविक आवाजों के साथ मुकाबला करेंगे।',
     loadingArgument: 'तर्क लोड हो रहा है...',
@@ -189,7 +201,7 @@ const DEBATE_TRANSLATIONS = {
   },
   'te-IN': {
     liveDebate: 'లైవ్ చర్చ',
-    turns: (count: number) => `${count} వంతులు`,
+    turns: (count) => `${count} వంతులు`,
     conflictLabel: 'వైరుధ్యం:',
     emptyText: 'చర్చను ప్రారంభించండి నొక్కండి — వారు నిజమైన వాయిస్‌లతో నిరంతరంగా చర్చించుకుంటారు.',
     loadingArgument: 'వాదన లోడ్ అవుతోంది...',
@@ -199,6 +211,48 @@ const DEBATE_TRANSLATIONS = {
     noteText: 'AI వాయిస్‌లు · వాదనలు ప్రీ-లోడ్ చేయబడ్డాయి · ఆపే వరకు నడుస్తుంది',
   },
 };
+
+interface FighterCardProps {
+  name: string;
+  side: 'A' | 'B';
+  isActive: boolean;
+  pulseAnim: any;
+}
+
+function FighterCard({ name, side, isActive, pulseAnim }: FighterCardProps) {
+  const theme = useTheme();
+  return (
+    <View
+      style={[
+        styles.fighterCard,
+        {
+          borderColor: isActive
+            ? side === 'A' ? theme.conflict : theme.primary
+            : theme.outline,
+          backgroundColor: isActive
+            ? side === 'A' ? theme.conflictContainer : theme.primaryContainer
+            : 'transparent',
+        },
+      ]}
+    >
+      <View style={[styles.sideBadge, { backgroundColor: side === 'A' ? theme.conflict : theme.primary }]}>
+        <ThemedText type="code" style={[styles.sideLetter, { color: theme.surface }]}>{side}</ThemedText>
+      </View>
+      <ThemedText
+        type="smallBold"
+        numberOfLines={2}
+        style={[styles.fighterName, { color: isActive ? (side === 'A' ? theme.conflict : theme.primary) : theme.text }]}
+      >
+        {name}
+      </ThemedText>
+      {isActive && (
+        <Animated.View style={[styles.dot, { transform: [{ scale: pulseAnim }] }]}>
+          <View style={[styles.dotInner, { backgroundColor: side === 'A' ? theme.conflict : theme.primary }]} />
+        </Animated.View>
+      )}
+    </View>
+  );
+}
 
 export function DebateArena({
   conflict,
@@ -218,12 +272,13 @@ export function DebateArena({
 
   // Refs
   const isRunningRef = useRef(false);
-  const historyRef = useRef<Array<{ speaker: string; text: string }>>([]);
+  const historyRef = useRef<{ speaker: string; text: string }[]>([]);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+  const runPipelineRef = useRef<((promise: Promise<PrefetchedTurn>) => Promise<void>) | null>(null);
 
   // Pulsing animation
-  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const pulseAnim = React.useMemo(() => new Animated.Value(1), []);
   useEffect(() => {
     if (isRunning || isLoading) {
       const loop = Animated.loop(
@@ -306,10 +361,14 @@ export function DebateArena({
       setTranscript((prev) => prev.map((e) => (e.id === entryId ? { ...e, isActive: false } : e)));
 
       // ── Next turn is likely already prefetched — minimal or zero gap ───────
-      runPipeline(nextTurnPromise);
+      runPipelineRef.current?.(nextTurnPromise);
     },
     [conflict, decisionContext, stakeholders, language]
   );
+
+  useEffect(() => {
+    runPipelineRef.current = runPipeline;
+  }, [runPipeline]);
 
   // ---------------------------------------------------------------------------
   // Controls
@@ -353,38 +412,6 @@ export function DebateArena({
 
   const activeIsA = (isRunning || isLoading) && currentSpeaker === 'groupA';
   const activeIsB = (isRunning || isLoading) && currentSpeaker === 'groupB';
-
-  const FighterCard = ({ name, side, isActive }: { name: string; side: 'A' | 'B'; isActive: boolean }) => (
-    <View
-      style={[
-        styles.fighterCard,
-        {
-          borderColor: isActive
-            ? side === 'A' ? theme.conflict : theme.primary
-            : theme.outline,
-          backgroundColor: isActive
-            ? side === 'A' ? theme.conflictContainer : theme.primaryContainer
-            : 'transparent',
-        },
-      ]}
-    >
-      <View style={[styles.sideBadge, { backgroundColor: side === 'A' ? theme.conflict : theme.primary }]}>
-        <ThemedText type="code" style={[styles.sideLetter, { color: theme.surface }]}>{side}</ThemedText>
-      </View>
-      <ThemedText
-        type="smallBold"
-        numberOfLines={2}
-        style={[styles.fighterName, { color: isActive ? (side === 'A' ? theme.conflict : theme.primary) : theme.text }]}
-      >
-        {name}
-      </ThemedText>
-      {isActive && (
-        <Animated.View style={[styles.dot, { transform: [{ scale: pulseAnim }] }]}>
-          <View style={[styles.dotInner, { backgroundColor: side === 'A' ? theme.conflict : theme.primary }]} />
-        </Animated.View>
-      )}
-    </View>
-  );
 
   const currentLang = language === 'unknown' ? 'en-IN' : language;
   const t = DEBATE_TRANSLATIONS[currentLang] || DEBATE_TRANSLATIONS['en-IN'];
@@ -441,7 +468,7 @@ export function DebateArena({
 
       {/* Fighter cards */}
       <View style={styles.fightersRow}>
-        <FighterCard name={conflict.groupA} side="A" isActive={activeIsA} />
+        <FighterCard name={conflict.groupA} side="A" isActive={activeIsA} pulseAnim={pulseAnim} />
         <View style={styles.vsContainer}>
           <View style={[styles.vsDivider, { backgroundColor: theme.outline }]} />
           <View style={[styles.vsCircle, { backgroundColor: theme.conflict, borderColor: theme.surface }]}>
@@ -449,7 +476,7 @@ export function DebateArena({
           </View>
           <View style={[styles.vsDivider, { backgroundColor: theme.outline }]} />
         </View>
-        <FighterCard name={conflict.groupB} side="B" isActive={activeIsB} />
+        <FighterCard name={conflict.groupB} side="B" isActive={activeIsB} pulseAnim={pulseAnim} />
       </View>
 
       {/* Transcript */}
