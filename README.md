@@ -1,56 +1,125 @@
-# Welcome to your Expo app 👋
+<div align="center">
+  <h1>🔵 Echo</h1>
+  <h3>Decision Blind Spot Detector</h3>
+  <p><i>Every policy has blind spots. Echo finds them.</i></p>
+  <br />
+</div>
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+## 📖 Overview
 
-## Get started
+**73% of policy failures trace back to overlooked stakeholders.** In government, institutions, and corporations, the loudest voices shape decisions, while the most affected voices are rarely heard.
 
-1. Install dependencies
+**Echo** is an AI-powered Decision Blind Spot Detector. It doesn't tell you what decision to make; it tells you whose voice is missing from the room. By analyzing proposed decisions, Echo automatically discovers affected stakeholders, flags hidden conflicts, quantifies fairness, and even suggests an improved "Shadow Policy" — ensuring that no community is left behind.
 
+Built for the **ZenysLab HackPrix (June 2026)**.
+
+---
+
+## ✨ Core Features
+
+- 👁️ **Who Did We Forget?** - Echo instantly detects communities that are structurally overlooked by a proposed policy (e.g., rural workers, caregivers, disabled individuals).
+- 📊 **Equity Index Score** - An automated algorithmic score (0-100) that drops when stakeholders are forgotten or when high-severity negative impacts are detected.
+- 💬 **Live Stakeholder Debate** - Echo generates distinct AI personas for each affected group and uses ultra-realistic text-to-speech to let you hear their exact concerns and conflicts.
+- 📝 **Shadow Policy Generator** - If a policy is deeply flawed, Echo's AI will automatically draft an improved, equitable "Shadow Policy" that explicitly includes the forgotten groups and resolves internal conflicts.
+- 🎙️ **Trilingual Voice Input** - Speak your policy proposal naturally. Echo features native voice-to-text transcription in **English, Hindi, and Telugu**.
+- 🔗 **Solana Accountability Ledger** - All analyses and shadow policies are hashed and permanently logged to the Solana blockchain, creating an immutable, public record of organizational accountability.
+
+---
+
+## 🛠️ Tech Stack
+
+Echo is built with a modern, highly scalable architecture splitting a fluid mobile-first frontend with a secure AI proxy backend.
+
+### Frontend
+- **React Native / Expo Web:** Cross-platform fluid UI with responsive layouts.
+- **TypeScript:** Strict type safety and robust data models.
+- **Solana Web3.js:** For client-side blockchain transaction logging.
+
+### Backend & Database
+- **Node.js & Express:** Custom proxy server to protect API keys and handle heavy data formatting.
+- **MongoDB:** High-performance history and document storage for all generated simulations.
+
+### AI & APIs
+- **Gemini 2.0 Flash:** Advanced multimodal reasoning and contextual intelligence for policy impact analysis.
+- **Groq AI (LLaMA 3.1 8B):** Lightning-fast inference engine used for rapid stakeholder analysis, policy generation, and language translation.
+- **Sarvam AI:** State-of-the-art transcription specifically tuned for Indian languages (Hindi, Telugu).
+- **ElevenLabs:** Ultra-realistic, emotive voice synthesis for the live stakeholder debate.
+
+### Deployment
+- **Vultr:** Dedicated cloud hosting for the Node.js backend.
+- **Vercel:** Edge hosting for the static Expo Web frontend.
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+- Node.js (v18+)
+- MongoDB connection string
+- API Keys for: Groq, Sarvam AI, and ElevenLabs
+- Phantom Wallet (or any Solana wallet for devnet testing)
+
+### Installation
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/f4w4z/zenyslab-hackprix-submission.git
+   cd zenyslab-hackprix-submission
+   ```
+
+2. **Install dependencies:**
    ```bash
    npm install
+   cd server && npm install
+   cd ..
    ```
 
-2. Start the app
+3. **Set up Environment Variables:**
+   Create a `.env` file in the root directory and add:
+   ```env
+   # API Keys
+   GROQ_API_KEY=your_groq_api_key
+   SARVAM_API_KEY=your_sarvam_api_key
+   ELEVENLABS_API_KEY=your_elevenlabs_api_key
 
+   # MongoDB
+   MONGODB_URI=your_mongodb_connection_string
+
+   # Solana Configuration
+   EXPO_PUBLIC_RPC_ENDPOINT=https://api.devnet.solana.com
+   EXPO_PUBLIC_PROGRAM_ID=your_deployed_program_id
+   ```
+
+4. **Start the Development Servers:**
+   Open two terminal windows.
+   
+   Terminal 1 (Backend):
    ```bash
-   npx expo start
+   cd server
+   npm run dev
    ```
 
-In the output, you'll find options to open the app in a
+   Terminal 2 (Frontend):
+   ```bash
+   npm run web
+   ```
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+5. **Open in Browser:**
+   Navigate to `http://localhost:8081` (or the port specified by Expo) to use the app.
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+---
 
-## Get a fresh project
+## 🧠 How it Works (Architecture Flow)
 
-When you're ready, run:
+1. **Input:** User speaks a policy in Hindi, Telugu, or English.
+2. **Transcription:** Audio is sent to the Express proxy, which forwards it to Sarvam AI for highly accurate text transcription.
+3. **Refinement:** The raw text is passed to Groq to fix grammar and deduce the exact policy intent.
+4. **Analysis:** Groq executes a massive parallel prompt to identify stakeholders, severities, and conflicts. 
+5. **Localization:** The analysis is instantly translated into the user's selected language using Groq's JSON formatting.
+6. **Storage & Logging:** The simulation is saved to MongoDB, and a cryptographic hash of the policy is minted to the Solana Devnet for public verification.
 
-```bash
-npm run reset-project
-```
+---
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-### Other setup steps
-
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+<div align="center">
+  <p><b>Built with ❤️ for ZenysLab HackPrix</b></p>
+</div>
