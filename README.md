@@ -113,9 +113,9 @@ Echo is built with a modern, highly scalable architecture splitting a fluid mobi
 
 1. **Input:** User speaks a policy in Hindi, Telugu, or English.
 2. **Transcription:** Audio is sent to the Express proxy, which forwards it to Sarvam AI for highly accurate text transcription.
-3. **Refinement:** The raw text is passed to Groq to fix grammar and deduce the exact policy intent.
-4. **Analysis:** Groq executes a massive parallel prompt to identify stakeholders, severities, and conflicts. 
-5. **Localization:** The analysis is instantly translated into the user's selected language using Groq's JSON formatting.
+3. **Refinement:** The raw text is passed to Gemini 2.0 Flash to fix grammar and deduce the exact policy intent.
+4. **Analysis:** Gemini executes a massive parallel prompt to identify stakeholders, severities, and conflicts. 
+5. **Localization:** The analysis is instantly translated into the user's selected language using Gemini's JSON formatting capabilities.
 6. **Storage & Logging:** The simulation is saved to MongoDB, and a cryptographic hash of the policy is minted to the Solana Devnet for public verification.
 
 ---
